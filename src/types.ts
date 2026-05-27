@@ -341,3 +341,18 @@ export interface DiffRowData {
 }
 
 export type CanonicalFileId = (value: string) => string | null;
+
+// ── Shared UI handler / view helper types ──────────────────────
+export type DiffSide = "left" | "right";
+export type SymbolHandler = (id: string) => void;
+export type FileJumpHandler = (fileId: string, line?: number) => void;
+export type DecisionHandler = (id: string) => void;
+export type SetStatusHandler = (status: TriageStatus | null) => void;
+export type StatusMap = Record<string, TriageStatus>;
+export type NoiseMode = "focus" | "all" | "expanded";
+
+export interface RichHandlers {
+  onSymbol: SymbolHandler;
+  onFile: FileJumpHandler;
+  onDecision: DecisionHandler;
+}

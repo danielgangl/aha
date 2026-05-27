@@ -81,15 +81,18 @@ The fragment may contain these fields only:
    - 1-2 short HTML paragraphs, or
    - a tight value-only low-mental-friction bullet list with <ul><li>...</li></ul>.
    Prefer bullets when the diff contains several visual changes but only a small functional change.
-   Say concretely what changed functionally, what stayed mechanical/noise-like, and where to focus.
+   Say concretely what changed functionally and what is only refactor, formatting, move/extraction, or diff noise.
+   Do not add a separate review-focus or checklist bullet.
+   Avoid generic umbrella labels; prefer concrete labels such as "Refactor", "Formatierung", "Imports", "Move/Extraction", "Diff-Noise", or "Kein Verhaltensdelta".
    Do not summarize imports, formatting, or file structure unless that is the only meaningful change.
    Keep it factual, specific, and German.
    Good shapes:
    - "<p>Funktional ändert diese Datei nur den Skip-Guard; der restliche Diff ist Reflow der bestehenden Branches.</p>"
-   - "<ul><li>Funktional: der ModuLine-Branch liest die Höhe jetzt aus der Section.</li><li>Review-Fokus: prüfe den Fallback für bestehende DSM-Konfigurationen.</li></ul>"
+   - "<ul><li>Funktional: <code>listShops</code> kann unzugängliche Shops jetzt ausschließen; <code>wydd.server</code> und <code>train.server</code> nutzen das gegen aufgeblähte Training-Daten.</li><li>Refactor: Props extrahiert und Namen bereinigt; kein eigenes Verhaltensdelta.</li></ul>"
    Bad:
    - "<p>This file handles validation.</p>"
    - "<p>Viele Änderungen in dieser Datei.</p>"
+   - "<ul><li>Funktional: ...</li><li>Bitte prüfen: ...</li></ul>"
 
 2. file.notes
    Add inline AI notes anchored to existing diff lines:
@@ -901,7 +904,7 @@ Code Context fragment:
   "files": [
     {
       "path": "existing/files/path.ts",
-      "note": "<ul><li>Funktional: kurze Delta-Summary dieser Datei.</li><li>Review-Fokus: welche Bedingung, Invariante oder Handoff wirklich zählt.</li></ul>",
+      "note": "<ul><li>Funktional: kurze Delta-Summary dieser Datei.</li><li>Refactor: sichtbarer Umbau ohne eigenes Verhaltensdelta.</li></ul>",
       "notes": [
         { "afterR": 42, "src": "kontext · ai", "html": "<p>...</p>" }
       ]

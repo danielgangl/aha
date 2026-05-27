@@ -7,3 +7,8 @@
 - High-Level IA vereinfachen: High Level bleibt nur Orientierung (`mentalModelDelta`, `systemMap`, `modelDeltas`, `flows`); alles Bewertbare wird ein gemeinsames `Review Focus` / `Review Checks` Modell mit klaren Action-Typen wie `verify`, `inspect`, `decide`, `test-gap`, damit Punkte nicht zwischen `assumptions`, `hotspots` und `decisions` duplizieren.
 - `risk` type inline ai notes.
 - File level note should be a mini summary: wenn im Diff visuell viele Änderungen sind, aber funktional nur eine kleine Bedingung angepasst wurde oder sich genau ein Behaviour geändert hat, soll man das vorab wissen und Noise selbst ignorieren können.
+- File-level note example for repo-port style summaries:
+  `projects/labelizer/shared/server/shop.server.ts`
+  - erweitert `listShops` um `excludeInaccessible` prop, das in `wydd.server` und `train.server` jetzt genutzt wird, um dort die training data nicht zu bloaten
+  - refactor: props extraction und name cleanings
+- File-level notes should also call out: viel diff noise aber 0% functional Änderung.
