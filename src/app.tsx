@@ -2440,17 +2440,6 @@ function App({
     });
   }, []);
 
-  const resetReviewState = useCallback(() => {
-    skipNextPersistRef.current = true;
-    setReviewed(new Set());
-    setViewedFileMap({});
-    setChangedViewedFiles(new Set());
-    setDecisionStatus({});
-    localStorage.removeItem(reviewStateKey);
-    localStorage.removeItem(legacyReviewStateStorageKey);
-    localStorage.removeItem(legacyStatusStorageKey);
-    fetch("/aha-state.json", { method: "DELETE" }).catch(() => {});
-  }, [legacyReviewStateStorageKey, legacyStatusStorageKey, reviewStateKey]);
 
   const onRailResizeStart = useCallback((event: React.PointerEvent) => {
     event.preventDefault();
@@ -2600,6 +2589,17 @@ function App({
           </span>
         </div>
 
+        <button
+          className="theme-toggle"
+          type="button"
+          onClick={() => setTweak("theme", t.theme === "dark" ? "light" : "dark")}
+          title={t.theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+          aria-label="Toggle light and dark theme"
+          data-theme={t.theme}
+        >
+          <span aria-hidden="true">{t.theme === "dark" ? "☀" : "☾"}</span>
+        </button>
+
       </header>
 
       {workflowOpen && <WorkflowModal pr={pr} runtime={runtime} onClose={() => setWorkflowOpen(false)} />}
@@ -2726,40 +2726,6 @@ function App({
         </aside>
       </div>
 
-      {/* Tweaks panel */}
-      <TweaksPanel title="Tweaks">
-        <TweakSection label="Appearance">
-          <TweakRadio
-            label="Theme"
-            value={t.theme}
-            options={["light", "dark"]}
-            onChange={(v) => setTweak("theme", v)}
-          />
-        </TweakSection>
-        <TweakSection label="AI margin notes">
-          <TweakToggle
-            label="Show inline notes"
-            value={t.showAiNotes}
-            onChange={(v) => {
-              setTweak("showAiNotes", v);
-              document.body.classList.toggle("hide-ai-notes", !v);
-            }}
-          />
-        </TweakSection>
-        <TweakSection label="Reading">
-          <TweakRadio
-            label="Density"
-            value={t.density}
-            options={["cozy", "default", "dense"]}
-            onChange={(v) => setTweak("density", v)}
-          />
-        </TweakSection>
-        <TweakSection label="Review state">
-          <button className="tweak-button" type="button" onClick={resetReviewState}>
-            Reset viewed/actions
-          </button>
-        </TweakSection>
-      </TweaksPanel>
     </div>
   );
 }
@@ -2771,7 +2737,7 @@ interface Tweaks {
 }
 
 const TWEAK_DEFAULTS: Tweaks = /*EDITMODE-BEGIN*/{
-  "theme": "light",
+  "theme": "dark",
   "showAiNotes": true,
   "density": "default"
 }/*EDITMODE-END*/;
@@ -3639,59 +3605,6 @@ function useTweaks(defaults: Tweaks): [Tweaks, (key: keyof Tweaks, value: TweakV
   }, []);
 
   return [values, setTweak];
-}
-
-function TweaksPanel({ children }: { title?: string; children: ReactNode }) {
-  return <div className="tweaks-panel">{children}</div>;
-}
-
-function TweakSection({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <section className="tweak-section">
-      <div className="tweak-label">{label}</div>
-      {children}
-    </section>
-  );
-}
-
-function TweakRadio({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="tweak-control">
-      <span>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map((option) => (
-          <option key={option} value={option}>{option}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function TweakToggle({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <label className="tweak-control">
-      <span>{label}</span>
-      <input type="checkbox" checked={value} onChange={(event) => onChange(event.target.checked)} />
-    </label>
-  );
 }
 
 createRoot(document.getElementById("root")!).render(<AhaLoader />);
