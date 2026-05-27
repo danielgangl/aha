@@ -383,7 +383,7 @@ function App({
             onClick={() => setMode("code")}
             title="Read the diff (default)"
           >
-            <span className="font-sans text-[12px] font-semibold text-ink-4 group-data-[active=true]:text-ink">¶</span> Code
+            Code
           </button>
         </div>
 
@@ -505,7 +505,7 @@ function App({
                   <FileCard
                     key={f.id}
                     file={f}
-                    order={i + 1}
+                    order={readingMode === "default" ? null : i + 1}
                     signal={pr.reviewSignals.files[fileSignalKey(f)]}
                     patterns={pr.reviewSignals.patterns}
                     symbols={pr.symbols}

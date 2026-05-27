@@ -356,7 +356,7 @@ export function LeftRail({
           }}
         />
       </div>
-      <div className="grid grid-cols-2 gap-1 px-2.5 pt-2 pb-1">
+      <div className="grid grid-cols-2 gap-1 px-2.5 pt-2 pb-2 border-b border-line">
         <SwitchButton
           active={readingMode === "default"}
           onClick={() => onReadingModeChange("default")}
@@ -367,18 +367,10 @@ export function LeftRail({
           disabled={!hasAiOrder}
           active={readingMode !== "default"}
           onClick={() => hasAiOrder && onReadingModeChange(readingOrders[0].key)}
-          title={hasAiOrder ? activeOrder?.why || readingOrders[0].why : "AI reading order unavailable"}
+          title={hasAiOrder ? activeOrder?.why || readingOrders[0].why : "Grouped order unavailable"}
         >
-          AI order
+          Grouped
         </SwitchButton>
-      </div>
-      <div
-        data-available={hasAiOrder}
-        className="px-3 pb-2 border-b border-line text-pine-ink text-[10.5px] leading-[1.35] data-[available=false]:text-ink-4"
-      >
-        {hasAiOrder
-          ? `${activeOrder?.label || readingOrders[0].label} available`
-          : "AI reading order unavailable"}
       </div>
       <div className="grid grid-cols-3 gap-1 px-2.5 pt-2 pb-1">
         <SwitchButton small active={noiseMode === "focus"} onClick={() => onNoiseModeChange("focus")}>

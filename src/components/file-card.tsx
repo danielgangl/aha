@@ -148,7 +148,7 @@ export function FileCard({
   scrollRoot,
 }: {
   file: PackFile;
-  order: number;
+  order: number | null;
   signal: FileSignal | undefined;
   patterns: Record<string, ReviewSignalPattern> | undefined;
   symbols: SymbolMap | undefined;
@@ -304,7 +304,7 @@ export function FileCard({
       >
         <div className="flex min-w-0 items-center gap-[6px]">
           <button
-            className="grid min-h-[28px] min-w-0 max-w-[calc(100%-30px)] flex-[0_1_auto] cursor-pointer grid-cols-[18px_26px_minmax(0,1fr)] items-center gap-[10px] border-0 bg-transparent py-[2px] text-left text-inherit"
+            className="grid min-h-[28px] min-w-0 max-w-[calc(100%-30px)] flex-[0_1_auto] cursor-pointer grid-cols-[18px_minmax(0,1fr)] items-center gap-[10px] border-0 bg-transparent py-[2px] text-left text-inherit"
             type="button"
             onClick={() => onToggleCollapsed(file)}
             title={collapsed ? `Expand ${file.path}` : `Collapse ${file.path}`}
@@ -313,15 +313,12 @@ export function FileCard({
             <span className="inline-flex h-[18px] w-[18px] rotate-90 items-center justify-center font-mono text-[var(--ink-3)] transition-transform duration-[120ms] [transition-timing-function:ease] group-data-[collapsed=true]/file:rotate-0">
               ›
             </span>
-            {/* `.order-num` */}
-            <span className="inline-flex h-[22px] w-[26px] items-center justify-center rounded-[5px] bg-[var(--ink)] font-mono text-[11px] font-semibold text-[var(--bg)]">
-              {order}
-            </span>
-            {/* `.path` */}
+            {/* `.path` — prefixed with a plain "N. " only in grouped (AI) order */}
             <span
               className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[13px] font-medium leading-[1.35] text-[var(--ink)]"
               title={file.path}
             >
+              {order != null && <span className="text-[var(--ink-3)] font-normal">{order}. </span>}
               {file.path}
             </span>
           </button>
