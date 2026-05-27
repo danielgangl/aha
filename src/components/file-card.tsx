@@ -118,7 +118,7 @@ function ViewedCheckbox({
 }) {
   return (
     <div
-      className="group/viewed inline-flex h-[22px] cursor-pointer select-none items-center gap-[6px] rounded-[5px] border border-[var(--line-2)] bg-[var(--surface)] px-[6px] text-[11px] text-[var(--ink-2)]"
+      className="group/viewed inline-flex h-[22px] cursor-pointer select-none items-center gap-[6px] rounded-[5px] border border-[var(--line-2)] bg-[var(--surface)] px-[6px] text-[11px] text-[var(--ink-2)] transition-colors hover:border-[var(--line-3)] hover:bg-[var(--bg-2)] hover:text-[var(--ink)]"
       data-on={on}
       onClick={onClick}
     >
