@@ -492,7 +492,7 @@ function App({
               {/* Briefing strip — minimal, code-author-voice */}
               <div className="sticky top-0 z-[8] bg-paper border-b border-line py-[14px] px-[24px] flex flex-wrap gap-y-[16px] gap-x-[24px] items-start justify-between" ref={briefingRef}>
                 <div className="flex gap-[14px] items-start min-w-0 flex-[1_1_360px]">
-                  <div className="w-[30px] h-[30px] rounded-[7px] bg-ink text-bg inline-flex items-center justify-center font-sans text-[14px] font-semibold shrink-0">¶</div>
+                  <div aria-hidden="true" className="w-[30px] h-[30px] rounded-[8px] grid place-items-center bg-surface border border-line-2 text-ink text-[15px] leading-none shrink-0 shadow-[0_1px_0_color-mix(in_oklab,var(--color-surface)_60%,#fff),0_10px_22px_-16px_color-mix(in_oklab,var(--color-blue)_60%,transparent)]">◇</div>
                   <div>
                     <h1 className="font-sans font-semibold text-[16px] leading-[1.3] m-0 mb-[3px] text-ink tracking-[-0.005em]">{pr.title}</h1>
                     <div className="text-[12.5px] text-ink-2 leading-[1.5] max-w-[760px]">{pr.oneLiner}</div>
