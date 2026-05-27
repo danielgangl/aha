@@ -118,11 +118,11 @@ function ViewedCheckbox({
 }) {
   return (
     <div
-      className="group/viewed inline-flex h-[22px] cursor-pointer select-none items-center gap-[6px] rounded-[5px] border border-[var(--line)] bg-[var(--surface)] px-[6px] text-[11px] text-[var(--ink-2)]"
+      className="group/viewed inline-flex h-[22px] cursor-pointer select-none items-center gap-[6px] rounded-[5px] border border-[var(--line-2)] bg-[var(--surface)] px-[6px] text-[11px] text-[var(--ink-2)]"
       data-on={on}
       onClick={onClick}
     >
-      <span className="inline-flex h-[14px] w-[14px] items-center justify-center rounded-[3px] border-[1.5px] border-[var(--line-3)] bg-[var(--surface)] font-sans text-[11px] font-bold leading-none group-data-[on=true]/viewed:border-[var(--ink)] group-data-[on=true]/viewed:bg-[var(--ink)] group-data-[on=true]/viewed:text-[var(--bg)] group-data-[on=true]/viewed:after:content-['✓']" />{" "}
+      <span className="inline-flex h-[14px] w-[14px] items-center justify-center rounded-[3px] border-[1.5px] border-[var(--ink-4)] bg-[var(--surface)] font-sans text-[11px] font-bold leading-none group-data-[on=true]/viewed:border-[var(--ink)] group-data-[on=true]/viewed:bg-[var(--ink)] group-data-[on=true]/viewed:text-[var(--bg)] group-data-[on=true]/viewed:after:content-['✓']" />{" "}
       <span>Viewed</span>
     </div>
   );
