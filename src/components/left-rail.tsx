@@ -409,8 +409,8 @@ export function LeftRail({
           return (
             <div className="pt-1.5" key={g.key}>
               <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-[7px] gap-y-1 px-3.5 pt-[9px] pb-1 text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3">
-                <span className="inline-flex w-4 h-4 rounded-[4px] bg-ink text-bg font-mono items-center justify-center text-[10px] font-semibold">
-                  {gi + 1}
+                <span className="font-mono text-ink-4 text-[10px] font-semibold tabular-nums">
+                  {gi + 1}.
                 </span>
                 <span>{g.label}</span>
                 <span className="col-span-full text-ink-4 font-normal tracking-normal normal-case text-[10px] leading-[1.3] min-w-0">
