@@ -123,8 +123,14 @@
   --font-serif: var(--font-sans);
 }
 
-/* Dark mode overrides the @theme --color-* tokens directly, so BOTH Tailwind
-   token utilities (bg-bg, text-ink-2, …) and the --* alias references switch. */
+/* Dark mode. We override BOTH layers:
+   1. the @theme --color-* tokens, so Tailwind token utilities (bg-bg, text-ink-2)
+      switch; and
+   2. the --* short aliases, re-resolved against the dark tokens. The aliases must
+      be re-declared here because CSS var() indirection does NOT propagate: a
+      `:root { --bg: var(--color-bg) }` alias resolves once at :root and inherits
+      that value, so overriding --color-bg deeper would otherwise leave var(--bg)
+      (and Prism's var(--rose-ink), the diff's var(--add-bg), etc.) stuck light. */
 .theme-dark {
   --color-bg: oklch(0.155 0.008 270);
   --color-bg-2: oklch(0.185 0.008 270);
@@ -155,6 +161,33 @@
 
   --color-add-bg: oklch(0.28 0.06 152);
   --color-del-bg: oklch(0.3 0.08 25);
+
+  /* re-resolve aliases against the dark tokens above */
+  --bg: var(--color-bg);
+  --bg-2: var(--color-bg-2);
+  --bg-3: var(--color-bg-3);
+  --rail: var(--color-rail);
+  --surface: var(--color-surface);
+  --paper: var(--color-paper);
+  --ink: var(--color-ink);
+  --ink-2: var(--color-ink-2);
+  --ink-3: var(--color-ink-3);
+  --ink-4: var(--color-ink-4);
+  --line: var(--color-line);
+  --line-2: var(--color-line-2);
+  --line-3: var(--color-line-3);
+  --blue-soft: var(--color-blue-soft);
+  --blue-ink: var(--color-blue-ink);
+  --amber-soft: var(--color-amber-soft);
+  --amber-ink: var(--color-amber-ink);
+  --pine-soft: var(--color-pine-soft);
+  --pine-ink: var(--color-pine-ink);
+  --rose-soft: var(--color-rose-soft);
+  --rose-ink: var(--color-rose-ink);
+  --violet-soft: var(--color-violet-soft);
+  --violet-ink: var(--color-violet-ink);
+  --add-bg: var(--color-add-bg);
+  --del-bg: var(--color-del-bg);
 }
 
 @layer base {
