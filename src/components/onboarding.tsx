@@ -6,6 +6,7 @@ import {
   fillAhaWorkflowPrompt,
   ahaCommand,
   AHA_FULL_WORKFLOW_INIT_PROMPT,
+  AHA_FULL_WORKFLOW_UPDATE_PROMPT,
 } from "../prompts.js";
 
 type StepState = "active" | "upcoming" | "done";
@@ -201,10 +202,12 @@ export function OnboardingPromptAction({
   prompt,
   active = false,
   onCopied,
+  label = "Copy instructions",
 }: {
   prompt: string;
   active?: boolean;
   onCopied?: () => void;
+  label?: string;
 }) {
   const resetRef = useRef<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -237,10 +240,10 @@ export function OnboardingPromptAction({
       type="button"
       data-copied={copied}
       onClick={copy}
-      aria-label={copied ? "Instructions copied to clipboard" : "Copy the setup instructions for your coding agent"}
+      aria-label={copied ? "Copied to clipboard" : label}
     >
       <span className="flex items-center justify-between gap-3">
-        <span className="text-sm font-semibold leading-[1.3] tracking-[-0.006em] text-ink">Copy instructions</span>
+        <span className="text-sm font-semibold leading-[1.3] tracking-[-0.006em] text-ink">{label}</span>
         <span
           className={
             "inline-flex items-center gap-[7px] flex-none text-[11.5px] font-semibold tracking-[-0.003em] transition-[color] duration-200 ease-[ease] " +
@@ -264,5 +267,62 @@ export function OnboardingPromptAction({
         {firstLine}
       </code>
     </button>
+  );
+}
+
+// Update modal — onboarding-style: show the full update prompt with a single
+// copy action and a "paste it into your agent" hint.
+export function UpdateModal({ runtime = DEFAULT_RUNTIME, onClose }: { runtime?: Runtime; onClose: () => void }) {
+  const cliCommand = runtime.ahaCli || DEFAULT_RUNTIME.ahaCli;
+  const updatePrompt = fillAhaWorkflowPrompt(AHA_FULL_WORKFLOW_UPDATE_PROMPT, {
+    cliCommand,
+    targetRepo: "",
+    prNumber: "",
+    packPath: ".aha/aha-<branch>-<pr-number>.json",
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] grid place-items-center p-6 bg-[color-mix(in_oklab,var(--color-ink)_22%,transparent)]"
+      role="presentation"
+      onMouseDown={onClose}
+    >
+      <section
+        className="relative w-[min(520px,100%)] rounded-2xl border border-line-2 bg-surface p-7 shadow-[0_24px_80px_color-mix(in_oklab,var(--color-ink)_22%,transparent)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Update this review"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button
+          className="absolute top-3 right-3 w-7 h-7 border-0 rounded-[5px] bg-transparent text-ink-3 text-[20px] leading-none cursor-pointer hover:bg-bg-3 hover:text-ink"
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          ×
+        </button>
+        <div className="flex flex-col items-center text-center">
+          <div
+            aria-hidden="true"
+            className="w-14 h-14 grid place-items-center mb-[22px] rounded-2xl bg-surface border border-line-2 text-ink text-[22px] leading-none shadow-[0_1px_0_color-mix(in_oklab,var(--color-surface)_60%,#fff),0_22px_44px_-26px_color-mix(in_oklab,var(--color-blue)_60%,transparent)]"
+          >
+            ↻
+          </div>
+          <h2 className="m-0 font-sans font-semibold text-[22px] leading-[1.1] tracking-[-0.018em] text-ink">
+            Update this review
+          </h2>
+          <p className="mt-3 mb-0 max-w-[42ch] text-[14px] leading-[1.55] text-ink-3">
+            Hand this prompt to your coding agent to refresh the pack against the latest PR state.
+          </p>
+          <div className="w-full mt-5 text-left">
+            <OnboardingPromptAction prompt={updatePrompt} active label="Copy update prompt" />
+          </div>
+          <p className="mt-3 mb-0 font-mono text-[11px] leading-[1.4] text-ink-4">
+            Then paste it into your coding agent.
+          </p>
+        </div>
+      </section>
+    </div>
   );
 }

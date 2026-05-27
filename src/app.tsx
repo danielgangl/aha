@@ -43,7 +43,7 @@ import { CallSitesPanel } from "./components/call-sites";
 import { FileCard } from "./components/file-card";
 import { HighLevelLeftRail, HighLevelView } from "./components/high-level";
 import { LeftRail } from "./components/left-rail";
-import { EmptyOnboarding } from "./components/onboarding";
+import { EmptyOnboarding, UpdateModal } from "./components/onboarding";
 import { WorkflowModal } from "./components/workflow";
 import "./styles/global.css";
 
@@ -104,6 +104,7 @@ function App({
   const [readingMode, setReadingMode] = useState(initialReadingMode);
   const [noiseMode, setNoiseMode] = useState<NoiseMode>("focus");
   const [workflowOpen, setWorkflowOpen] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
   // Transient flash highlight when jumping from a decision card to a diff line.
   const [flashKey, setFlashKey] = useState<FlashKey | null>(null);
   const [decisionFlashId, setDecisionFlashId] = useState<string | null>(null);
@@ -390,6 +391,15 @@ function App({
         <div className="flex-1" />
 
         <button
+          className="h-[24px] px-[10px] border border-line rounded-[5px] bg-bg-3 text-ink-2 text-[11px] font-medium cursor-pointer hover:bg-blue-soft hover:text-blue-ink hover:border-blue-soft"
+          type="button"
+          onClick={() => setUpdateOpen(true)}
+          title="Show the update prompt for your agent"
+        >
+          Update
+        </button>
+
+        <button
           className="h-[24px] px-[8px] border-0 rounded-[5px] bg-bg-3 text-ink-2 font-mono text-[10.5px] cursor-pointer hover:bg-blue-soft hover:text-blue-ink"
           type="button"
           onClick={() => setWorkflowOpen(true)}
@@ -420,6 +430,7 @@ function App({
       </header>
 
       {workflowOpen && <WorkflowModal pr={pr} runtime={runtime} onClose={() => setWorkflowOpen(false)} />}
+      {updateOpen && <UpdateModal runtime={runtime} onClose={() => setUpdateOpen(false)} />}
 
       <div
         className={`relative grid h-full overflow-hidden ${
