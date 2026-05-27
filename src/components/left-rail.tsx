@@ -408,8 +408,8 @@ export function LeftRail({
           if (!g.files.length) return null;
           return (
             <div className="pt-1.5" key={g.key}>
-              <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-[7px] gap-y-1 px-3.5 pt-[9px] pb-1 text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3">
-                <span className="font-mono text-blue-ink text-[10px] font-semibold tabular-nums">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-[7px] gap-y-1 mx-3.5 pt-[9px] pb-2 mb-1 border-b border-line text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3">
+                <span className="font-mono text-ink-3 text-[10px] font-semibold tabular-nums">
                   {gi + 1}.
                 </span>
                 <span>{g.label}</span>
