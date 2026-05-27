@@ -1,0 +1,3184 @@
+{
+  "schemaVersion": "0.1",
+  "repositoryName": "recruiting-app",
+  "number": 847,
+  "title": "Add organization-scoped CV sharing",
+  "decisions": {
+    "categories": [
+      {
+        "key": "truths",
+        "label": "New Truths",
+        "why": "what's now factually true post-merge"
+      },
+      {
+        "key": "decisions",
+        "label": "Decisions Made",
+        "why": "shape-of-the-world choices to accept or reject"
+      },
+      {
+        "key": "trust",
+        "label": "Trust Boundary",
+        "why": "who enforces auth, where"
+      },
+      {
+        "key": "lifecycle",
+        "label": "Data Lifecycle",
+        "why": "old data, new data, copies, revoke"
+      },
+      {
+        "key": "asymmetry",
+        "label": "Asymmetries",
+        "why": "internal inconsistencies in the PR"
+      },
+      {
+        "key": "coverage",
+        "label": "Coverage",
+        "why": "what tests prove vs what they don't"
+      },
+      {
+        "key": "questions",
+        "label": "Open Questions",
+        "why": "answer before merge"
+      }
+    ],
+    "cards": [
+      {
+        "id": "dc-truth-1",
+        "category": "truths",
+        "risk": "high",
+        "title": "A CV can now be read in three independent ways",
+        "claim": "Post-merge, can read CV ⇒ owner OR public-token OR same organization_id. Any one branch in canViewCV returning true grants access.",
+        "whyItMatters": "Every reader of cvs must route through canViewCV, or it silently skips the new branch. The blast radius is every place that pulls a CV from the DB.",
+        "sections": [
+          {
+            "kind": "evidence",
+            "label": "Evidence",
+            "items": [
+              {
+                "line": 13,
+                "ref": "canViewCV.ts:13",
+                "desc": "the third branch added",
+                "path": "services/cv/permissions/canViewCV.ts"
+              },
+              {
+                "line": 5,
+                "ref": "migration:5",
+                "desc": "the column it reads",
+                "path": "migrations/20251123_add_org_to_cvs.sql"
+              }
+            ]
+          },
+          {
+            "kind": "gap",
+            "label": "Gap",
+            "items": [
+              {
+                "line": 6,
+                "ref": "export.ts:6",
+                "desc": "reads cv via raw findUnique — does not call canViewCV",
+                "path": "api/cv/[id]/export.ts"
+              }
+            ]
+          },
+          {
+            "kind": "check",
+            "label": "Check",
+            "text": "Do all read paths route through canViewCV? export.ts is in the blast radius but does a raw findUnique."
+          }
+        ]
+      },
+      {
+        "id": "dc-decision-1",
+        "category": "decisions",
+        "risk": "med",
+        "title": "Org sharing modeled as a column on cvs, not a join table",
+        "claim": "organization_id lives directly on cvs. There is no cv_org_shares join table, no per-recipient ACL, no support for multiple orgs.",
+        "whyItMatters": "Caps the model at one organization per CV. A second org or per-member permissions later would need a migration off the column model.",
+        "sections": [
+          {
+            "kind": "evidence",
+            "label": "Evidence",
+            "items": [
+              {
+                "line": 5,
+                "ref": "migration:5",
+                "desc": "single column added to cvs",
+                "path": "migrations/20251123_add_org_to_cvs.sql"
+              },
+              {
+                "line": 15,
+                "ref": "shareCVWithOrg:15",
+                "desc": "writer sets one org",
+                "path": "services/cv/shareCVWithOrg.ts"
+              }
+            ]
+          },
+          {
+            "kind": "alternative",
+            "label": "What this rules out",
+            "items": [
+              {
+                "ref": "cv_org_shares table",
+                "desc": "would allow multi-org"
+              },
+              {
+                "ref": "per-member ACL",
+                "desc": "would allow per-user grants within an org"
+              }
+            ]
+          },
+          {
+            "kind": "check",
+            "label": "Check",
+            "text": "Is single-org-per-CV the long-term model? Multi-org or per-recipient ACL needed later?"
+          }
+        ]
+      },
+      {
+        "id": "dc-decision-2",
+        "category": "decisions",
+        "risk": "med",
+        "title": "Read-permission rule centralized in canViewCV",
+        "claim": "Rather than scattering checks at each reader, the PR adds the new branch in one place. Every reader is expected to call canViewCV.",
+        "whyItMatters": "Centralization is correct — but only if every reader actually goes through it. One bypass and the rule is fiction.",
+        "sections": [
+          {
+            "kind": "evidence",
+            "label": "Evidence",
+            "items": [
+              {
+                "line": 13,
+                "ref": "canViewCV.ts:13",
+                "desc": "new branch added centrally",
+                "path": "services/cv/permissions/canViewCV.ts"
+              },
+              {
+                "line": 7,
+                "ref": "canViewCV.ts:7",
+                "desc": "4 callers in codebase",
+                "path": "services/cv/permissions/canViewCV.ts"
+              }
+            ]
+          },
+          {
+            "kind": "gap",
+            "label": "Gap",
+            "items": [
+              {
+                "line": 6,
+                "ref": "export.ts:6",
+                "desc": "is a reader, doesn't call canViewCV",
+                "path": "api/cv/[id]/export.ts"
+              }
+            ]
+          },
+          {
+            "kind": "check",
+            "label": "Check",
+            "text": "Is the export.ts bypass intentional or missed?"
+          }
+        ]
+      },
+      {
+        "id": "dc-trust-1",
+        "category": "trust",
+        "risk": "high",
+        "title": "Service writers do not enforce ownership",
+        "claim": "shareCVWithOrg accepts any actor and writes organization_id to any CV. The API route runs requireAuth — authentication, not ownership.",
+        "whyItMatters": "The gate location is unclear. UI hides the share action for non-owners; server only verifies auth. A direct curl from any logged-in user can share a colleague's CV with the colleague's org.",
+        "sections": [
+          {
+            "kind": "evidence",
+            "label": "Evidence",
+            "items": [
+              {
+                "line": 11,
+                "ref": "shareCVWithOrg.ts:11",
+                "desc": "no ownership check",
+                "path": "services/cv/shareCVWithOrg.ts"
+              },
+              {
+                "line": 6,
+                "ref": "share.ts:6",
+                "desc": "only requireAuth(req)",
+                "path": "api/cvs/[id]/share.ts"
+              },
+              {
+                "line": 30,
+                "ref": "CVCard.tsx:30",
+                "desc": "UI gates on isOwner",
+                "path": "components/CVCard.tsx"
+              }
+            ]
+          },
+          {
+            "kind": "asymmetry",
+            "label": "Asymmetry within this PR",
+            "items": [
+              {
+                "line": 11,
+                "ref": "revokeOrgSharing.ts:11",
+                "desc": "DOES check cv.userId === actor.id",
+                "path": "services/cv/revokeOrgSharing.ts"
+              }
+            ]
+          },
+          {
+            "kind": "check",
+            "label": "Check",
+            "text": "Should ownership live in the service or the API route? The PR is internally inconsistent — revoke checks, share doesn't."
+          }
+        ]
+      },
+      {
+        "id": "dc-lifecycle-1",
+        "category": "lifecycle",
+        "risk": "high",
+        "title": "Existing CVs enter the new world with organization_id = NULL",
+        "claim": "The migration adds a nullable column. No backfill statement. ~12,418 pre-existing rows land in the new permission code path with organization_id = NULL.",
+        "whyItMatters": "canViewCV compares cv.organization_id === user.organizationId. For users whose own organizationId is NULL (system actors, cron jobs, seed admins), NULL === NULL is true — granting access to every legacy CV.",
+        "sections": [
+          {
+            "kind": "evidence",
+            "label": "Evidence",
+            "items": [
+              {
+                "line": 5,
+                "ref": "migration:5",
+                "desc": "ADD COLUMN ... NULL — no DEFAULT, no backfill",
+                "path": "migrations/20251123_add_org_to_cvs.sql"
+              },
+              {
+                "line": 13,
+                "ref": "canViewCV.ts:13",
+                "desc": "comparison via === without NULL guard",
+                "path": "services/cv/permissions/canViewCV.ts"
+              }
+            ]
+          },
+          {
+            "kind": "check",
+            "label": "Check",
+            "text": "Acceptable for legacy CVs to enter the new code path as NULL? Acceptable for NULL-org actors to satisfy the new branch?"
+          }
+        ]
+      },
+      {
+        "id": "dc-lifecycle-2",
+        "category": "lifecycle",
+        "risk": "med",
+        "title": "Duplicate inherits the source's organization, not the actor's",
+        "claim": "duplicateCV copies organization_id from the source CV. The actor's own organizationId is ignored.",
+        "whyItMatters": "Now that non-owners can interact with org-shared CVs (via ShareMenu), a duplicator who is a member but not owner creates a copy that lives in the source's org — under the duplicator's userId. Ownership and org membership for the new CV may disagree with the duplicator's intent.",
+        "sections": [
+          {
+            "kind": "evidence",
+            "label": "Evidence",
+            "items": [
+              {
+                "line": 31,
+                "ref": "duplicateCV.ts:31",
+                "desc": "organization_id: source.organization_id",
+                "path": "services/cv/duplicateCV.ts"
+              },
+              {
+                "line": 53,
+                "ref": "ShareMenu.tsx:53",
+                "desc": "duplicate now reachable from org-shared context",
+                "path": "components/ShareMenu.tsx"
+              }
+            ]
+          },
+          {
+            "kind": "check",
+            "label": "Check",
+            "text": "Should duplicate inherit source.organization_id or actor.organizationId? Are cross-user duplicates expected?"
+          }
+        ]
+      },
+      {
+        "id": "dc-asym-1",
+        "category": "asymmetry",
+        "risk": "med",
+        "title": "revokeOrgSharing clears organization_id but leaves publicTokenId untouched",
+        "claim": "Revoke only writes organization_id = NULL. cv.publicTokenId is a separate field set by the existing share-link flow and is not modified.",
+        "whyItMatters": "The word \"revoke\" in the UI may imply a stronger guarantee than the implementation provides. A CV that was once public-shared still loads via /share/<token> after org revoke.",
+        "sections": [
+          {
+            "kind": "evidence",
+            "label": "Evidence",
+            "items": [
+              {
+                "line": 15,
+                "ref": "revokeOrgSharing.ts:15",
+                "desc": "only writes organization_id: null",
+                "path": "services/cv/revokeOrgSharing.ts"
+              }
+            ]
+          },
+          {
+            "kind": "check",
+            "label": "Check",
+            "text": "Should revoke also invalidate / rotate the public token? Or are these orthogonal sharing channels by design?"
+          }
+        ]
+      },
+      {
+        "id": "dc-coverage-1",
+        "category": "coverage",
+        "risk": "med",
+        "title": "Tests prove the happy path; the contradicted assumptions are untested",
+        "claim": "Two specs: admin shares with own org; member reads after share. No specs for the behaviours the PR potentially breaks.",
+        "whyItMatters": "Whatever the PR adds is covered. Whatever the PR risks is not. A regression in an unchanged sibling path won't fail CI.",
+        "sections": [
+          {
+            "kind": "evidence",
+            "label": "Tests in this PR",
+            "items": [
+              {
+                "line": 15,
+                "ref": "shareCVWithOrg.test.ts:15",
+                "desc": "share writes the column",
+                "path": "tests/shareCVWithOrg.test.ts"
+              },
+              {
+                "line": 22,
+                "ref": "shareCVWithOrg.test.ts:22",
+                "desc": "org member can read after share",
+                "path": "tests/shareCVWithOrg.test.ts"
+              }
+            ]
+          },
+          {
+            "kind": "gap",
+            "label": "Untested paths",
+            "items": [
+              {
+                "ref": "legacy CV access",
+                "desc": "what happens to organization_id = NULL?"
+              },
+              {
+                "ref": "non-owner share attempt",
+                "desc": "API permits, UI hides — which is the boundary?"
+              },
+              {
+                "ref": "revoke + public token",
+                "desc": "does /share/<token> still serve after revoke?"
+              },
+              {
+                "ref": "PDF export auth",
+                "desc": "does export.ts respect the new visibility class?"
+              },
+              {
+                "ref": "cross-user duplicate",
+                "desc": "ownership and organization_id of the copy"
+              }
+            ]
+          },
+          {
+            "kind": "check",
+            "label": "Check",
+            "text": "Which of these need negative-path tests before merge?"
+          }
+        ]
+      }
+    ],
+    "questions": [
+      {
+        "id": "q1",
+        "text": "Should api/cv/[id]/export.ts route through canViewCV like its sibling endpoints?",
+        "jumps": [
+          {
+            "line": 6,
+            "path": "api/cv/[id]/export.ts"
+          }
+        ]
+      },
+      {
+        "id": "q2",
+        "text": "Should shareCVWithOrg validate ownership, or is the API edge the only intended gate?",
+        "jumps": [
+          {
+            "line": 11,
+            "path": "services/cv/shareCVWithOrg.ts"
+          },
+          {
+            "line": 6,
+            "path": "api/cvs/[id]/share.ts"
+          }
+        ]
+      },
+      {
+        "id": "q3",
+        "text": "Should the migration backfill organization_id for existing CVs? If yes, with which value?",
+        "jumps": [
+          {
+            "line": 5,
+            "path": "migrations/20251123_add_org_to_cvs.sql"
+          }
+        ]
+      },
+      {
+        "id": "q4",
+        "text": "Should revokeOrgSharing invalidate or rotate the public share token?",
+        "jumps": [
+          {
+            "line": 15,
+            "path": "services/cv/revokeOrgSharing.ts"
+          }
+        ]
+      },
+      {
+        "id": "q5",
+        "text": "Should duplicateCV inherit source.organization_id or actor.organizationId?",
+        "jumps": [
+          {
+            "line": 31,
+            "path": "services/cv/duplicateCV.ts"
+          }
+        ]
+      },
+      {
+        "id": "q6",
+        "text": "Should every existing switch over CVVisibility get an explicit 'org-shared' branch? (CVCard.getCVBadgeColor currently defaults to 'red'.)",
+        "jumps": [
+          {
+            "line": 44,
+            "path": "components/CVCard.tsx"
+          },
+          {
+            "line": 4,
+            "path": "constants/cv.ts"
+          }
+        ]
+      },
+      {
+        "id": "q7",
+        "text": "Is single-org-per-CV (column model) the long-term plan, or will we need multi-org / ACL?",
+        "jumps": [
+          {
+            "line": 5,
+            "path": "migrations/20251123_add_org_to_cvs.sql"
+          }
+        ]
+      }
+    ]
+  },
+  "oneLiner": "Recruiting agencies can now share candidate CVs with their organization. A new nullable column on cvs gates this, and the existing read-permission check learns a third branch.",
+  "branch": "feat/org-cv-sharing",
+  "base": "main",
+  "author": {
+    "name": "Maria Lehmann",
+    "initials": "ML"
+  },
+  "filesChanged": 11,
+  "added": 182,
+  "removed": 1,
+  "opened": "2 days ago",
+  "files": [
+    {
+      "group": "Schema",
+      "groupReason": "the new column the other files read",
+      "path": "migrations/20251123_add_org_to_cvs.sql",
+      "tag": "new",
+      "add": 15,
+      "del": 0,
+      "note": "Adds the <code>organization_id</code> column the rest of the PR reads, plus an audit table for share / revoke events. <em>The column is nullable with no backfill.</em>",
+      "diff": [
+        {
+          "k": "add",
+          "R": 1,
+          "c": "-- 20251123_add_org_to_cvs.sql"
+        },
+        {
+          "k": "add",
+          "R": 2,
+          "c": "-- Adds organization-scoped sharing to CVs."
+        },
+        {
+          "k": "add",
+          "R": 3,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 4,
+          "c": [
+            "ALTER TABLE ",
+            {
+              "type": "symbol",
+              "label": "cvs",
+              "id": "tbl-cvs"
+            }
+          ]
+        },
+        {
+          "k": "add",
+          "R": 5,
+          "c": [
+            "  ADD COLUMN ",
+            {
+              "type": "symbol",
+              "label": "organization_id",
+              "id": "col-orgid"
+            },
+            " UUID NULL"
+          ]
+        },
+        {
+          "k": "add",
+          "R": 6,
+          "c": "  REFERENCES organizations(id);"
+        },
+        {
+          "k": "add",
+          "R": 7,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 8,
+          "c": [
+            "CREATE INDEX idx_cvs_org ON ",
+            {
+              "type": "symbol",
+              "label": "cvs",
+              "id": "tbl-cvs"
+            },
+            "(",
+            {
+              "type": "symbol",
+              "label": "organization_id",
+              "id": "col-orgid"
+            },
+            ");"
+          ]
+        },
+        {
+          "k": "add",
+          "R": 9,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 10,
+          "c": "-- audit log for share / revoke events"
+        },
+        {
+          "k": "add",
+          "R": 11,
+          "c": "CREATE TABLE cv_share_audit ("
+        },
+        {
+          "k": "add",
+          "R": 12,
+          "c": "  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),"
+        },
+        {
+          "k": "add",
+          "R": 13,
+          "c": "  cv_id       UUID NOT NULL REFERENCES cvs(id),"
+        },
+        {
+          "k": "add",
+          "R": 14,
+          "c": "  actor_id    UUID NOT NULL,"
+        },
+        {
+          "k": "add",
+          "R": 15,
+          "c": "  action      TEXT NOT NULL,"
+        },
+        {
+          "k": "add",
+          "R": 16,
+          "c": "  created_at  TIMESTAMPTZ DEFAULT now()"
+        },
+        {
+          "k": "add",
+          "R": 17,
+          "c": ");"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 6,
+          "src": "context · ai",
+          "html": "The column is <code>NULL</code> by default and there's no backfill in this migration. ~12k pre-existing rows will hit the new code path with <code>organization_id = NULL</code> — relevant for <a class=\"jump\" data-file=\"f-canview\">canViewCV.ts</a> below.",
+          "anchor": {
+            "side": "right",
+            "line": 6,
+            "textFingerprint": "af1-21g6e29w64r",
+            "text": "  REFERENCES organizations(id);"
+          }
+        }
+      ],
+      "diffFingerprint": "df1-b6br2hk263"
+    },
+    {
+      "group": "Permissions",
+      "groupReason": "the only authorisation check that gates CV reads",
+      "path": "services/cv/permissions/canViewCV.ts",
+      "tag": "modified",
+      "add": 1,
+      "del": 0,
+      "note": "Adds a third branch to the read-permission check: same-organization access.",
+      "diff": [
+        {
+          "k": "ctx",
+          "L": 1,
+          "R": 1,
+          "c": "import { db } from \"@/db\";"
+        },
+        {
+          "k": "ctx",
+          "L": 2,
+          "R": 2,
+          "c": "import type { User } from \"@/types/user\";"
+        },
+        {
+          "k": "ctx",
+          "L": 3,
+          "R": 3,
+          "c": ""
+        },
+        {
+          "k": "ctx",
+          "L": 4,
+          "R": 4,
+          "c": "/**"
+        },
+        {
+          "k": "ctx",
+          "L": 5,
+          "R": 5,
+          "c": " * Returns true if the user is allowed to read this CV."
+        },
+        {
+          "k": "ctx",
+          "L": 6,
+          "R": 6,
+          "c": " */"
+        },
+        {
+          "k": "ctx",
+          "L": 7,
+          "R": 7,
+          "c": [
+            "export async function ",
+            {
+              "type": "symbol",
+              "label": "canViewCV",
+              "id": "fn-canViewCV"
+            },
+            "(cvId: string, user: User) {"
+          ]
+        },
+        {
+          "k": "ctx",
+          "L": 8,
+          "R": 8,
+          "c": "  const cv = await db.cvs.findUnique({ where: { id: cvId } });"
+        },
+        {
+          "k": "ctx",
+          "L": 9,
+          "R": 9,
+          "c": "  if (!cv) return false;"
+        },
+        {
+          "k": "ctx",
+          "L": 10,
+          "R": 10,
+          "c": ""
+        },
+        {
+          "k": "ctx",
+          "L": 11,
+          "R": 11,
+          "c": "  if (cv.userId === user.id) return true;"
+        },
+        {
+          "k": "ctx",
+          "L": 12,
+          "R": 12,
+          "c": "  if (cv.publicTokenId) return true;"
+        },
+        {
+          "k": "add",
+          "R": 13,
+          "c": [
+            "  if (cv.",
+            {
+              "type": "symbol",
+              "label": "organization_id",
+              "id": "col-orgid"
+            },
+            " === user.organizationId) return true;"
+          ]
+        },
+        {
+          "k": "ctx",
+          "L": 13,
+          "R": 14,
+          "c": "  return false;"
+        },
+        {
+          "k": "ctx",
+          "L": 14,
+          "R": 15,
+          "c": "}"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 13,
+          "src": "context · ai",
+          "html": "<code>cv.organization_id</code> is the column from the migration. <code>user.organizationId</code> is set by the auth middleware (<a class=\"jump\" data-symbol=\"col-orgid\">3 writers · 4 readers</a>).",
+          "anchor": {
+            "side": "right",
+            "line": 13,
+            "textFingerprint": "af1-22i5fx9l6rk",
+            "text": "  if (cv.organization_id === user.organizationId) return true;"
+          }
+        },
+        {
+          "afterR": 15,
+          "src": "context · ai",
+          "html": "<strong>Used by 4 callers in this codebase.</strong> 3 of them are touched by this PR (<a class=\"jump\" data-symbol=\"fn-canViewCV\">show all</a>). One caller — <code>api/cv/[id]/export.ts</code> — is in this PR's blast radius but doesn't go through this function.",
+          "anchor": {
+            "side": "right",
+            "line": 15,
+            "textFingerprint": "af1-sgoioarvvw",
+            "text": "}"
+          }
+        }
+      ],
+      "diffFingerprint": "df1-9fkh2c40v3"
+    },
+    {
+      "group": "Services",
+      "groupReason": "writers of the new column — start with the simplest",
+      "path": "services/cv/shareCVWithOrg.ts",
+      "tag": "new",
+      "add": 19,
+      "del": 0,
+      "note": "New service. Sets <code>organization_id</code> on a CV to the actor's org.",
+      "diff": [
+        {
+          "k": "add",
+          "R": 1,
+          "c": "import { db } from \"@/db\";"
+        },
+        {
+          "k": "add",
+          "R": 2,
+          "c": "import { auditShareEvent } from \"./audit\";"
+        },
+        {
+          "k": "add",
+          "R": 3,
+          "c": "import type { User } from \"@/types/user\";"
+        },
+        {
+          "k": "add",
+          "R": 4,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 5,
+          "c": [
+            "export async function ",
+            {
+              "type": "symbol",
+              "label": "shareCVWithOrg",
+              "id": "fn-shareCVWithOrg"
+            },
+            "("
+          ]
+        },
+        {
+          "k": "add",
+          "R": 6,
+          "c": "  cvId: string,"
+        },
+        {
+          "k": "add",
+          "R": 7,
+          "c": "  actor: User,"
+        },
+        {
+          "k": "add",
+          "R": 8,
+          "c": ") {"
+        },
+        {
+          "k": "add",
+          "R": 9,
+          "c": "  if (!actor.organizationId) {"
+        },
+        {
+          "k": "add",
+          "R": 10,
+          "c": "    throw new Error(\"Actor has no organization\");"
+        },
+        {
+          "k": "add",
+          "R": 11,
+          "c": "  }"
+        },
+        {
+          "k": "add",
+          "R": 12,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 13,
+          "c": "  const cv = await db.cvs.update({"
+        },
+        {
+          "k": "add",
+          "R": 14,
+          "c": "    where: { id: cvId },"
+        },
+        {
+          "k": "add",
+          "R": 15,
+          "c": [
+            "    data:  { ",
+            {
+              "type": "symbol",
+              "label": "organization_id",
+              "id": "col-orgid"
+            },
+            ": actor.organizationId },"
+          ]
+        },
+        {
+          "k": "add",
+          "R": 16,
+          "c": "  });"
+        },
+        {
+          "k": "add",
+          "R": 17,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 18,
+          "c": "  await auditShareEvent(cvId, actor.id, \"share_org\");"
+        },
+        {
+          "k": "add",
+          "R": 19,
+          "c": "  return cv;"
+        },
+        {
+          "k": "add",
+          "R": 20,
+          "c": "}"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 11,
+          "src": "context · ai",
+          "html": "The actor's <code>organizationId</code> comes from the auth middleware. There is <strong>no ownership check</strong> here — the API layer is the only gate. See <a class=\"jump\" data-file=\"f-api-share\">api/cvs/[id]/share.ts</a>.",
+          "anchor": {
+            "side": "right",
+            "line": 11,
+            "textFingerprint": "af1-3ukem334ex",
+            "text": "  }"
+          }
+        }
+      ],
+      "diffFingerprint": "df1-ke4394qoiz"
+    },
+    {
+      "group": "Services",
+      "groupReason": "writer · inverse of shareCVWithOrg",
+      "path": "services/cv/revokeOrgSharing.ts",
+      "tag": "new",
+      "add": 17,
+      "del": 0,
+      "note": "New service. Clears <code>organization_id</code> back to <code>NULL</code>. Owner-only.",
+      "diff": [
+        {
+          "k": "add",
+          "R": 1,
+          "c": "import { db } from \"@/db\";"
+        },
+        {
+          "k": "add",
+          "R": 2,
+          "c": "import { auditShareEvent } from \"./audit\";"
+        },
+        {
+          "k": "add",
+          "R": 3,
+          "c": "import type { User } from \"@/types/user\";"
+        },
+        {
+          "k": "add",
+          "R": 4,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 5,
+          "c": [
+            "export async function ",
+            {
+              "type": "symbol",
+              "label": "revokeOrgSharing",
+              "id": "fn-revokeOrgSharing"
+            },
+            "("
+          ]
+        },
+        {
+          "k": "add",
+          "R": 6,
+          "c": "  cvId: string,"
+        },
+        {
+          "k": "add",
+          "R": 7,
+          "c": "  actor: User,"
+        },
+        {
+          "k": "add",
+          "R": 8,
+          "c": ") {"
+        },
+        {
+          "k": "add",
+          "R": 9,
+          "c": "  const cv = await db.cvs.findUnique({ where: { id: cvId } });"
+        },
+        {
+          "k": "add",
+          "R": 10,
+          "c": "  if (!cv) throw new Error(\"CV not found\");"
+        },
+        {
+          "k": "add",
+          "R": 11,
+          "c": "  if (cv.userId !== actor.id) throw new Error(\"Only owner can revoke\");"
+        },
+        {
+          "k": "add",
+          "R": 12,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 13,
+          "c": "  await db.cvs.update({"
+        },
+        {
+          "k": "add",
+          "R": 14,
+          "c": "    where: { id: cvId },"
+        },
+        {
+          "k": "add",
+          "R": 15,
+          "c": [
+            "    data:  { ",
+            {
+              "type": "symbol",
+              "label": "organization_id",
+              "id": "col-orgid"
+            },
+            ": null },"
+          ]
+        },
+        {
+          "k": "add",
+          "R": 16,
+          "c": "  });"
+        },
+        {
+          "k": "add",
+          "R": 17,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 18,
+          "c": "  await auditShareEvent(cvId, actor.id, \"revoke_org\");"
+        },
+        {
+          "k": "add",
+          "R": 19,
+          "c": "}"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 16,
+          "src": "context · ai",
+          "html": "Clears <code>organization_id</code> only. The CV's <code>publicTokenId</code> (set by the existing share-link flow) is <em>not</em> touched here — it lives on its own field. If a token was ever generated, <code>/share/&lt;token&gt;</code> continues to work after revoke.",
+          "anchor": {
+            "side": "right",
+            "line": 16,
+            "textFingerprint": "af1-25s9lyl3hls",
+            "text": "  });"
+          }
+        }
+      ],
+      "diffFingerprint": "df1-1jtuvfqp6os"
+    },
+    {
+      "group": "Services",
+      "groupReason": "writer · existing function, single-line change worth context",
+      "path": "services/cv/duplicateCV.ts",
+      "tag": "modified",
+      "add": 1,
+      "del": 0,
+      "note": "Existing function — 50 lines unchanged. The one new line propagates <code>organization_id</code> from the source CV.",
+      "diff": [
+        {
+          "k": "hunk",
+          "c": "@@ existing imports, 20 lines @@"
+        },
+        {
+          "k": "ctx",
+          "L": 22,
+          "R": 22,
+          "c": [
+            "export async function ",
+            {
+              "type": "symbol",
+              "label": "duplicateCV",
+              "id": "fn-duplicateCV"
+            },
+            "(cvId: string, actor: User) {"
+          ]
+        },
+        {
+          "k": "ctx",
+          "L": 23,
+          "R": 23,
+          "c": "  const source = await db.cvs.findUnique({ where: { id: cvId } });"
+        },
+        {
+          "k": "ctx",
+          "L": 24,
+          "R": 24,
+          "c": "  if (!source) throw new Error(\"CV not found\");"
+        },
+        {
+          "k": "ctx",
+          "L": 25,
+          "R": 25,
+          "c": ""
+        },
+        {
+          "k": "ctx",
+          "L": 26,
+          "R": 26,
+          "c": "  return db.cvs.create({"
+        },
+        {
+          "k": "ctx",
+          "L": 27,
+          "R": 27,
+          "c": "    data: {"
+        },
+        {
+          "k": "ctx",
+          "L": 28,
+          "R": 28,
+          "c": "      title:    `${source.title} (copy)`,"
+        },
+        {
+          "k": "ctx",
+          "L": 29,
+          "R": 29,
+          "c": "      content:  source.content,"
+        },
+        {
+          "k": "ctx",
+          "L": 30,
+          "R": 30,
+          "c": "      userId:   actor.id,"
+        },
+        {
+          "k": "add",
+          "R": 31,
+          "c": [
+            "      ",
+            {
+              "type": "symbol",
+              "label": "organization_id",
+              "id": "col-orgid"
+            },
+            ": source.organization_id,"
+          ]
+        },
+        {
+          "k": "ctx",
+          "L": 31,
+          "R": 32,
+          "c": "    },"
+        },
+        {
+          "k": "ctx",
+          "L": 32,
+          "R": 33,
+          "c": "  });"
+        },
+        {
+          "k": "ctx",
+          "L": 33,
+          "R": 34,
+          "c": "}"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 31,
+          "src": "context · ai",
+          "html": "Behaviour change: the duplicate inherits <code>organization_id</code> from the <em>source</em>, not from the actor. <code>duplicateCV</code> has <a class=\"jump\" data-symbol=\"fn-duplicateCV\">4 call sites</a> — 2 from contexts where actor ≠ owner are reachable through the new org-shared UI.",
+          "anchor": {
+            "side": "right",
+            "line": 31,
+            "textFingerprint": "af1-18g03f7ua28",
+            "text": "      organization_id: source.organization_id,"
+          }
+        }
+      ],
+      "diffFingerprint": "df1-44cjnqaoue"
+    },
+    {
+      "group": "API",
+      "groupReason": "endpoint that calls the new service",
+      "path": "api/cvs/[id]/share.ts",
+      "tag": "modified",
+      "add": 5,
+      "del": 0,
+      "note": "Existing endpoint. Adds a <code>mode === 'org'</code> branch that dispatches to <code>shareCVWithOrg</code>.",
+      "diff": [
+        {
+          "k": "ctx",
+          "L": 1,
+          "R": 1,
+          "c": "import { requireAuth } from \"@/auth\";"
+        },
+        {
+          "k": "ctx",
+          "L": 2,
+          "R": 2,
+          "c": "import { createPublicShareToken } from \"@/services/share\";"
+        },
+        {
+          "k": "add",
+          "R": 3,
+          "c": [
+            "import { ",
+            {
+              "type": "symbol",
+              "label": "shareCVWithOrg",
+              "id": "fn-shareCVWithOrg"
+            },
+            " } from \"@/services/cv/shareCVWithOrg\";"
+          ]
+        },
+        {
+          "k": "ctx",
+          "L": 3,
+          "R": 4,
+          "c": ""
+        },
+        {
+          "k": "ctx",
+          "L": 4,
+          "R": 5,
+          "c": "export default async function handler(req, res) {"
+        },
+        {
+          "k": "ctx",
+          "L": 5,
+          "R": 6,
+          "c": "  const user = await requireAuth(req);"
+        },
+        {
+          "k": "ctx",
+          "L": 6,
+          "R": 7,
+          "c": "  const { id } = req.query;"
+        },
+        {
+          "k": "ctx",
+          "L": 7,
+          "R": 8,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 9,
+          "c": "  const { mode } = req.body;"
+        },
+        {
+          "k": "add",
+          "R": 10,
+          "c": "  if (mode === \"org\") {"
+        },
+        {
+          "k": "add",
+          "R": 11,
+          "c": [
+            "    await ",
+            {
+              "type": "symbol",
+              "label": "shareCVWithOrg",
+              "id": "fn-shareCVWithOrg"
+            },
+            "(id, user);"
+          ]
+        },
+        {
+          "k": "add",
+          "R": 12,
+          "c": "    return res.status(200).end();"
+        },
+        {
+          "k": "add",
+          "R": 13,
+          "c": "  }"
+        },
+        {
+          "k": "ctx",
+          "L": 8,
+          "R": 14,
+          "c": "  const token = await createPublicShareToken(id);"
+        },
+        {
+          "k": "ctx",
+          "L": 9,
+          "R": 15,
+          "c": "  res.json({ token });"
+        },
+        {
+          "k": "ctx",
+          "L": 10,
+          "R": 16,
+          "c": "}"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 8,
+          "src": "context · ai",
+          "html": "The handler runs <code>requireAuth</code> but no additional ownership check on <code>id</code>. <code>shareCVWithOrg</code> also doesn't validate ownership (see file above). For comparison: <code>revokeOrgSharing</code> <em>does</em> assert <code>cv.userId === actor.id</code>.",
+          "anchor": {
+            "side": "right",
+            "line": 8,
+            "textFingerprint": "af1-88eg3hrg2a",
+            "text": ""
+          }
+        },
+        {
+          "afterR": 13,
+          "src": "context · ai",
+          "html": "UI counterpart: <a class=\"jump\" data-file=\"f-cvcard\">CVCard.tsx</a> only shows the Share button when <code>cv.userId === user.id</code>.",
+          "anchor": {
+            "side": "right",
+            "line": 13,
+            "textFingerprint": "af1-3ukem334ex",
+            "text": "  }"
+          }
+        }
+      ],
+      "diffFingerprint": "df1-167ex89ixql"
+    },
+    {
+      "group": "API",
+      "groupReason": "reader of cv — unchanged, but in blast radius",
+      "path": "api/cv/[id]/export.ts",
+      "tag": "unchanged",
+      "add": 0,
+      "del": 0,
+      "note": "<em>Not modified in this PR.</em> Shown because the analyzer flags it as a reader of <code>cvs</code> not going through <code>canViewCV</code> — the only reader without that gate.",
+      "diff": [
+        {
+          "k": "ctx",
+          "L": 1,
+          "R": 1,
+          "c": "import { db } from \"@/db\";"
+        },
+        {
+          "k": "ctx",
+          "L": 2,
+          "R": 2,
+          "c": "import { renderCVToPDF } from \"@/services/pdf\";"
+        },
+        {
+          "k": "ctx",
+          "L": 3,
+          "R": 3,
+          "c": ""
+        },
+        {
+          "k": "ctx",
+          "L": 4,
+          "R": 4,
+          "c": "export default async function handler(req, res) {"
+        },
+        {
+          "k": "ctx",
+          "L": 5,
+          "R": 5,
+          "c": "  const { id } = req.query;"
+        },
+        {
+          "k": "ctx",
+          "L": 6,
+          "R": 6,
+          "c": [
+            "  const cv = await db.cvs.findUnique({ where: { id } });"
+          ]
+        },
+        {
+          "k": "ctx",
+          "L": 7,
+          "R": 7,
+          "c": "  if (!cv) return res.status(404).end();"
+        },
+        {
+          "k": "ctx",
+          "L": 8,
+          "R": 8,
+          "c": ""
+        },
+        {
+          "k": "ctx",
+          "L": 9,
+          "R": 9,
+          "c": "  const pdf = await renderCVToPDF(cv);"
+        },
+        {
+          "k": "ctx",
+          "L": 10,
+          "R": 10,
+          "c": "  res.setHeader(\"Content-Type\", \"application/pdf\");"
+        },
+        {
+          "k": "ctx",
+          "L": 11,
+          "R": 11,
+          "c": "  res.send(pdf);"
+        },
+        {
+          "k": "ctx",
+          "L": 12,
+          "R": 12,
+          "c": "}"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 6,
+          "src": "blast radius · ai",
+          "html": "<strong>Sibling endpoints</strong> <code>api/cv/[id]/route.ts</code> and <code>api/cv/[id]/preview.ts</code> both call <code>canViewCV</code> before reading. This one does a raw <code>findUnique</code>. Surfaced here because the new column adds a third visibility class — worth confirming this path is intentional.",
+          "anchor": {
+            "side": "right",
+            "line": 6,
+            "textFingerprint": "af1-29e3qjk9xz8",
+            "text": "  const cv = await db.cvs.findUnique({ where: { id } });"
+          }
+        }
+      ],
+      "diffFingerprint": "df1-10cmdwzliqs"
+    },
+    {
+      "group": "UI",
+      "groupReason": "consumer of the new share UI and visibility enum",
+      "path": "components/CVCard.tsx",
+      "tag": "modified",
+      "add": 7,
+      "del": 1,
+      "note": "Replaces the old <code>ShareButton</code> with the new <code>ShareMenu</code> component. Owner-only — non-owners see no share affordance.",
+      "diff": [
+        {
+          "k": "hunk",
+          "c": "@@ imports, 20 lines @@"
+        },
+        {
+          "k": "ctx",
+          "L": 22,
+          "R": 22,
+          "c": "export function CVCard({ cv }: { cv: CV }) {"
+        },
+        {
+          "k": "ctx",
+          "L": 23,
+          "R": 23,
+          "c": "  const user = useCurrentUser();"
+        },
+        {
+          "k": "ctx",
+          "L": 24,
+          "R": 24,
+          "c": "  const isOwner = cv.userId === user.id;"
+        },
+        {
+          "k": "ctx",
+          "L": 25,
+          "R": 25,
+          "c": ""
+        },
+        {
+          "k": "ctx",
+          "L": 26,
+          "R": 26,
+          "c": "  return ("
+        },
+        {
+          "k": "ctx",
+          "L": 27,
+          "R": 27,
+          "c": "    <Card>"
+        },
+        {
+          "k": "ctx",
+          "L": 28,
+          "R": 28,
+          "c": "      <CVTitle cv={cv} />"
+        },
+        {
+          "k": "ctx",
+          "L": 29,
+          "R": 29,
+          "c": [
+            "      <Badge color={",
+            {
+              "type": "symbol",
+              "label": "getCVBadgeColor",
+              "id": "fn-getCVBadgeColor"
+            },
+            "(cv.visibility)} />"
+          ]
+        },
+        {
+          "k": "del",
+          "L": 30,
+          "c": "      {isOwner && <ShareButton cvId={cv.id} />}"
+        },
+        {
+          "k": "add",
+          "R": 30,
+          "c": "      {isOwner && ("
+        },
+        {
+          "k": "add",
+          "R": 31,
+          "c": [
+            "        <",
+            {
+              "type": "symbol",
+              "label": "ShareMenu",
+              "id": "comp-ShareMenu"
+            },
+            ""
+          ]
+        },
+        {
+          "k": "add",
+          "R": 32,
+          "c": "          cvId={cv.id}"
+        },
+        {
+          "k": "add",
+          "R": 33,
+          "c": "          canShareWithOrg={!!user.organizationId}"
+        },
+        {
+          "k": "add",
+          "R": 34,
+          "c": "        />"
+        },
+        {
+          "k": "add",
+          "R": 35,
+          "c": "      )}"
+        },
+        {
+          "k": "ctx",
+          "L": 31,
+          "R": 36,
+          "c": "    </Card>"
+        },
+        {
+          "k": "ctx",
+          "L": 32,
+          "R": 37,
+          "c": "  );"
+        },
+        {
+          "k": "ctx",
+          "L": 33,
+          "R": 38,
+          "c": "}"
+        },
+        {
+          "k": "ctx",
+          "L": 34,
+          "R": 39,
+          "c": ""
+        },
+        {
+          "k": "ctx",
+          "L": 35,
+          "R": 40,
+          "c": [
+            "function ",
+            {
+              "type": "symbol",
+              "label": "getCVBadgeColor",
+              "id": "fn-getCVBadgeColor"
+            },
+            "(v: CVVisibility) {"
+          ]
+        },
+        {
+          "k": "ctx",
+          "L": 36,
+          "R": 41,
+          "c": "  switch (v) {"
+        },
+        {
+          "k": "ctx",
+          "L": 37,
+          "R": 42,
+          "c": "    case \"private\": return \"gray\";"
+        },
+        {
+          "k": "ctx",
+          "L": 38,
+          "R": 43,
+          "c": "    case \"public\":  return \"blue\";"
+        },
+        {
+          "k": "ctx",
+          "L": 39,
+          "R": 44,
+          "c": "    default:        return \"red\";   // error state"
+        },
+        {
+          "k": "ctx",
+          "L": 40,
+          "R": 45,
+          "c": "  }"
+        },
+        {
+          "k": "ctx",
+          "L": 41,
+          "R": 46,
+          "c": "}"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 35,
+          "src": "context · ai",
+          "html": "Owner-only on the client. The corresponding API endpoint <a class=\"jump\" data-file=\"f-api-share\">/api/cvs/[id]/share</a> doesn't repeat this check — only <code>requireAuth</code>.",
+          "anchor": {
+            "side": "right",
+            "line": 35,
+            "textFingerprint": "af1-14mb6knd1cv",
+            "text": "      )}"
+          }
+        },
+        {
+          "afterR": 44,
+          "src": "context · ai",
+          "html": "Unchanged function — included here because <code>CVVisibility</code> gained a value in the same PR (<a class=\"jump\" data-file=\"f-const\">constants/cv.ts</a>). This is the only switch over <code>CVVisibility</code> in the codebase.",
+          "anchor": {
+            "side": "right",
+            "line": 44,
+            "textFingerprint": "af1-1macuc66hfz",
+            "text": "    default:        return \"red\";   // error state"
+          }
+        }
+      ],
+      "diffFingerprint": "df1-1gu3qghk39o"
+    },
+    {
+      "group": "UI",
+      "groupReason": "new component — the visible affordance for the feature",
+      "path": "components/ShareMenu.tsx",
+      "tag": "new",
+      "add": 78,
+      "del": 0,
+      "note": "New component replacing <code>ShareButton</code>. Two actions: copy public link, or share with org.",
+      "diff": [
+        {
+          "k": "hunk",
+          "c": "@@ 1-12 — imports @@"
+        },
+        {
+          "k": "ctx",
+          "L": 13,
+          "R": 13,
+          "c": [
+            "export function ",
+            {
+              "type": "symbol",
+              "label": "ShareMenu",
+              "id": "comp-ShareMenu"
+            },
+            "({ cvId, canShareWithOrg }: Props) {"
+          ]
+        },
+        {
+          "k": "ctx",
+          "L": 14,
+          "R": 14,
+          "c": "  const [open, setOpen] = useState(false);"
+        },
+        {
+          "k": "ctx",
+          "L": 15,
+          "R": 15,
+          "c": ""
+        },
+        {
+          "k": "ctx",
+          "L": 16,
+          "R": 16,
+          "c": "  const shareWithOrg = async () => {"
+        },
+        {
+          "k": "ctx",
+          "L": 17,
+          "R": 17,
+          "c": "    await fetch(`/api/cvs/${cvId}/share`, {"
+        },
+        {
+          "k": "ctx",
+          "L": 18,
+          "R": 18,
+          "c": "      method: \"POST\","
+        },
+        {
+          "k": "ctx",
+          "L": 19,
+          "R": 19,
+          "c": "      body: JSON.stringify({ mode: \"org\" }),"
+        },
+        {
+          "k": "ctx",
+          "L": 20,
+          "R": 20,
+          "c": "    });"
+        },
+        {
+          "k": "ctx",
+          "L": 21,
+          "R": 21,
+          "c": "    toast.success(\"Shared with your organization\");"
+        },
+        {
+          "k": "ctx",
+          "L": 22,
+          "R": 22,
+          "c": "  };"
+        },
+        {
+          "k": "hunk",
+          "c": "@@ 23-78 — render menu @@"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 22,
+          "src": "context · ai",
+          "html": "<code>ShareMenu</code> is rendered by <a class=\"jump\" data-symbol=\"comp-ShareMenu\">1 caller</a> (<code>CVCard.tsx</code>). The HTTP call shape matches the new branch in <a class=\"jump\" data-file=\"f-api-share\">api/cvs/[id]/share.ts</a>.",
+          "anchor": {
+            "side": "right",
+            "line": 22,
+            "textFingerprint": "af1-qfgml7i8jj",
+            "text": "  };"
+          }
+        }
+      ],
+      "diffFingerprint": "df1-s5jq2a8mc"
+    },
+    {
+      "group": "Types",
+      "groupReason": "type-level addition consumed by UI",
+      "path": "constants/cv.ts",
+      "tag": "modified",
+      "add": 1,
+      "del": 0,
+      "note": "Extends the <code>CV_VISIBILITY</code> enum with a new value.",
+      "diff": [
+        {
+          "k": "ctx",
+          "L": 1,
+          "R": 1,
+          "c": "export const CV_VISIBILITY = {"
+        },
+        {
+          "k": "ctx",
+          "L": 2,
+          "R": 2,
+          "c": "  PRIVATE: \"private\","
+        },
+        {
+          "k": "ctx",
+          "L": 3,
+          "R": 3,
+          "c": "  PUBLIC:  \"public\","
+        },
+        {
+          "k": "add",
+          "R": 4,
+          "c": "  ORG:     \"org-shared\","
+        },
+        {
+          "k": "ctx",
+          "L": 4,
+          "R": 5,
+          "c": "} as const;"
+        },
+        {
+          "k": "ctx",
+          "L": 5,
+          "R": 6,
+          "c": ""
+        },
+        {
+          "k": "ctx",
+          "L": 6,
+          "R": 7,
+          "c": "export type CVVisibility = typeof CV_VISIBILITY[keyof typeof CV_VISIBILITY];"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 4,
+          "src": "context · ai",
+          "html": "<code>CVVisibility</code> is referenced by <a class=\"jump\" data-symbol=\"type-CVVisibility\">5 sites</a>. One of them is a <code>switch</code> with a <code>default</code> branch (see <a class=\"jump\" data-file=\"f-cvcard\">CVCard.tsx</a>).",
+          "anchor": {
+            "side": "right",
+            "line": 4,
+            "textFingerprint": "af1-crawwidvkd",
+            "text": "  ORG:     \"org-shared\","
+          }
+        }
+      ],
+      "diffFingerprint": "df1-j2h19mem0b"
+    },
+    {
+      "group": "Tests",
+      "groupReason": "evidence for the change",
+      "path": "tests/shareCVWithOrg.test.ts",
+      "tag": "new",
+      "add": 38,
+      "del": 0,
+      "note": "Two specs: an admin shares a CV with their org; a member can then read it.",
+      "diff": [
+        {
+          "k": "hunk",
+          "c": "@@ imports + setup, 14 lines @@"
+        },
+        {
+          "k": "add",
+          "R": 15,
+          "c": "it(\"shares a CV with the actor's organization\", async () => {"
+        },
+        {
+          "k": "add",
+          "R": 16,
+          "c": "  const cv = await createCV(adminUser);"
+        },
+        {
+          "k": "add",
+          "R": 17,
+          "c": [
+            "  await ",
+            {
+              "type": "symbol",
+              "label": "shareCVWithOrg",
+              "id": "fn-shareCVWithOrg"
+            },
+            "(cv.id, adminUser);"
+          ]
+        },
+        {
+          "k": "add",
+          "R": 18,
+          "c": "  const updated = await db.cvs.findUnique({ where: { id: cv.id } });"
+        },
+        {
+          "k": "add",
+          "R": 19,
+          "c": "  expect(updated.organization_id).toBe(adminUser.organizationId);"
+        },
+        {
+          "k": "add",
+          "R": 20,
+          "c": "});"
+        },
+        {
+          "k": "add",
+          "R": 21,
+          "c": ""
+        },
+        {
+          "k": "add",
+          "R": 22,
+          "c": "it(\"lets org members read a shared CV\", async () => {"
+        },
+        {
+          "k": "add",
+          "R": 23,
+          "c": "  const cv = await createCV(adminUser);"
+        },
+        {
+          "k": "add",
+          "R": 24,
+          "c": [
+            "  await ",
+            {
+              "type": "symbol",
+              "label": "shareCVWithOrg",
+              "id": "fn-shareCVWithOrg"
+            },
+            "(cv.id, adminUser);"
+          ]
+        },
+        {
+          "k": "add",
+          "R": 25,
+          "c": [
+            "  expect(await ",
+            {
+              "type": "symbol",
+              "label": "canViewCV",
+              "id": "fn-canViewCV"
+            },
+            "(cv.id, sameOrgMember)).toBe(true);"
+          ]
+        },
+        {
+          "k": "add",
+          "R": 26,
+          "c": "});"
+        }
+      ],
+      "notes": [
+        {
+          "afterR": 26,
+          "src": "context · ai",
+          "html": "Covers the new <em>happy</em> paths. No specs in this PR exercise: pre-existing CVs (NULL org), <code>revokeOrgSharing</code>, <code>duplicateCV</code>'s new line, or the unchanged <code>export.ts</code>.",
+          "anchor": {
+            "side": "right",
+            "line": 26,
+            "textFingerprint": "af1-99fx1bd6m7",
+            "text": "});"
+          }
+        }
+      ],
+      "diffFingerprint": "df1-pqy3wvzu7i"
+    }
+  ],
+  "symbols": {
+    "fn-canViewCV": {
+      "name": "canViewCV",
+      "kind": "async function",
+      "signature": "canViewCV(cvId: string, user: User): Promise<boolean>",
+      "defined": {
+        "line": 7,
+        "path": "services/cv/permissions/canViewCV.ts"
+      },
+      "summary": "Read-permission gate for a CV.",
+      "callers": [
+        {
+          "path": "services/cv/getCVById.ts",
+          "line": 41,
+          "inPR": true,
+          "status": "touched",
+          "context": {
+            "start": 41,
+            "end": 43,
+            "lines": [
+              {
+                "line": 41,
+                "c": "  if (!(await canViewCV(id, user))) {"
+              },
+              {
+                "line": 42,
+                "c": "    throw new ForbiddenError();"
+              },
+              {
+                "line": 43,
+                "c": "  }"
+              }
+            ]
+          }
+        },
+        {
+          "path": "api/cv/[id]/route.ts",
+          "line": 22,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 22,
+            "end": 24,
+            "lines": [
+              {
+                "line": 22,
+                "c": "  if (!(await canViewCV(id, user))) {"
+              },
+              {
+                "line": 23,
+                "c": "    return res.status(403).end();"
+              },
+              {
+                "line": 24,
+                "c": "  }"
+              }
+            ]
+          }
+        },
+        {
+          "path": "api/cv/[id]/preview.ts",
+          "line": 18,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 18,
+            "end": 18,
+            "lines": [
+              {
+                "line": 18,
+                "c": "  if (!(await canViewCV(id, user))) return null;"
+              }
+            ]
+          }
+        },
+        {
+          "path": "tests/shareCVWithOrg.test.ts",
+          "line": 25,
+          "inPR": true,
+          "status": "test",
+          "context": {
+            "start": 22,
+            "end": 26,
+            "lines": [
+              {
+                "line": 22,
+                "c": "it(\"lets org members read a shared CV\", async () => {"
+              },
+              {
+                "line": 23,
+                "c": "  const cv = await createCV(adminUser);"
+              },
+              {
+                "line": 24,
+                "c": "  await shareCVWithOrg(cv.id, adminUser);"
+              },
+              {
+                "line": 25,
+                "c": "  expect(await canViewCV(cv.id, sameOrgMember)).toBe(true);"
+              },
+              {
+                "line": 26,
+                "c": "});"
+              }
+            ]
+          }
+        }
+      ],
+      "notCallers": [
+        {
+          "path": "api/cv/[id]/export.ts",
+          "line": 6,
+          "why": "Reads cv via raw findUnique. Adjacent endpoints route through canViewCV; this one doesn't.",
+          "context": {
+            "start": 3,
+            "end": 11,
+            "lines": [
+              {
+                "line": 3,
+                "c": ""
+              },
+              {
+                "line": 4,
+                "c": "export default async function handler(req, res) {"
+              },
+              {
+                "line": 5,
+                "c": "  const { id } = req.query;"
+              },
+              {
+                "line": 6,
+                "c": "  const cv = await db.cvs.findUnique({ where: { id } });"
+              },
+              {
+                "line": 7,
+                "c": "  if (!cv) return res.status(404).end();"
+              },
+              {
+                "line": 8,
+                "c": ""
+              },
+              {
+                "line": 9,
+                "c": "  const pdf = await renderCVToPDF(cv);"
+              },
+              {
+                "line": 10,
+                "c": "  res.setHeader(\"Content-Type\", \"application/pdf\");"
+              },
+              {
+                "line": 11,
+                "c": "  res.send(pdf);"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "col-orgid": {
+      "name": "cvs.organization_id",
+      "kind": "db column",
+      "signature": "UUID NULL · REFERENCES organizations(id) · INDEX idx_cvs_org",
+      "defined": {
+        "line": 5,
+        "path": "migrations/20251123_add_org_to_cvs.sql"
+      },
+      "summary": "Set on a CV to make it readable by everyone in that organization.",
+      "callers": [
+        {
+          "path": "services/cv/shareCVWithOrg.ts",
+          "line": 15,
+          "inPR": true,
+          "status": "touched",
+          "role": "write",
+          "context": {
+            "start": 12,
+            "end": 20,
+            "lines": [
+              {
+                "line": 12,
+                "c": ""
+              },
+              {
+                "line": 13,
+                "c": "  const cv = await db.cvs.update({"
+              },
+              {
+                "line": 14,
+                "c": "    where: { id: cvId },"
+              },
+              {
+                "line": 15,
+                "c": "    data:  { organization_id: actor.organizationId },"
+              },
+              {
+                "line": 16,
+                "c": "  });"
+              },
+              {
+                "line": 17,
+                "c": ""
+              },
+              {
+                "line": 18,
+                "c": "  await auditShareEvent(cvId, actor.id, \"share_org\");"
+              },
+              {
+                "line": 19,
+                "c": "  return cv;"
+              },
+              {
+                "line": 20,
+                "c": "}"
+              }
+            ]
+          }
+        },
+        {
+          "path": "services/cv/revokeOrgSharing.ts",
+          "line": 15,
+          "inPR": true,
+          "status": "touched",
+          "role": "write",
+          "context": {
+            "start": 12,
+            "end": 19,
+            "lines": [
+              {
+                "line": 12,
+                "c": ""
+              },
+              {
+                "line": 13,
+                "c": "  await db.cvs.update({"
+              },
+              {
+                "line": 14,
+                "c": "    where: { id: cvId },"
+              },
+              {
+                "line": 15,
+                "c": "    data:  { organization_id: null },"
+              },
+              {
+                "line": 16,
+                "c": "  });"
+              },
+              {
+                "line": 17,
+                "c": ""
+              },
+              {
+                "line": 18,
+                "c": "  await auditShareEvent(cvId, actor.id, \"revoke_org\");"
+              },
+              {
+                "line": 19,
+                "c": "}"
+              }
+            ]
+          }
+        },
+        {
+          "path": "services/cv/duplicateCV.ts",
+          "line": 31,
+          "inPR": true,
+          "status": "touched",
+          "role": "write",
+          "context": {
+            "start": 28,
+            "end": 34,
+            "lines": [
+              {
+                "line": 28,
+                "c": "      title:    `${source.title} (copy)`,"
+              },
+              {
+                "line": 29,
+                "c": "      content:  source.content,"
+              },
+              {
+                "line": 30,
+                "c": "      userId:   actor.id,"
+              },
+              {
+                "line": 31,
+                "c": "      organization_id: source.organization_id,"
+              },
+              {
+                "line": 32,
+                "c": "    },"
+              },
+              {
+                "line": 33,
+                "c": "  });"
+              },
+              {
+                "line": 34,
+                "c": "}"
+              }
+            ]
+          }
+        },
+        {
+          "path": "services/cv/permissions/canViewCV.ts",
+          "line": 13,
+          "inPR": true,
+          "status": "touched",
+          "role": "read",
+          "context": {
+            "start": 10,
+            "end": 15,
+            "lines": [
+              {
+                "line": 10,
+                "c": ""
+              },
+              {
+                "line": 11,
+                "c": "  if (cv.userId === user.id) return true;"
+              },
+              {
+                "line": 12,
+                "c": "  if (cv.publicTokenId) return true;"
+              },
+              {
+                "line": 13,
+                "c": "  if (cv.organization_id === user.organizationId) return true;"
+              },
+              {
+                "line": 14,
+                "c": "  return false;"
+              },
+              {
+                "line": 15,
+                "c": "}"
+              }
+            ]
+          }
+        },
+        {
+          "path": "services/cv/listOrgCVs.ts",
+          "line": 9,
+          "inPR": true,
+          "status": "touched",
+          "role": "read",
+          "context": {
+            "start": 9,
+            "end": 9,
+            "lines": [
+              {
+                "line": 9,
+                "c": "  return db.cvs.findMany({ where: { organization_id: user.organizationId } });"
+              }
+            ]
+          }
+        }
+      ],
+      "notCallers": []
+    },
+    "fn-shareCVWithOrg": {
+      "name": "shareCVWithOrg",
+      "kind": "async function",
+      "signature": "shareCVWithOrg(cvId: string, actor: User): Promise<CV>",
+      "defined": {
+        "line": 5,
+        "path": "services/cv/shareCVWithOrg.ts"
+      },
+      "summary": "Sets organization_id on a CV. Does NOT validate ownership — relies on caller.",
+      "callers": [
+        {
+          "path": "api/cvs/[id]/share.ts",
+          "line": 11,
+          "inPR": true,
+          "status": "touched",
+          "context": {
+            "start": 8,
+            "end": 16,
+            "lines": [
+              {
+                "line": 8,
+                "c": ""
+              },
+              {
+                "line": 9,
+                "c": "  const { mode } = req.body;"
+              },
+              {
+                "line": 10,
+                "c": "  if (mode === \"org\") {"
+              },
+              {
+                "line": 11,
+                "c": "    await shareCVWithOrg(id, user);"
+              },
+              {
+                "line": 12,
+                "c": "    return res.status(200).end();"
+              },
+              {
+                "line": 13,
+                "c": "  }"
+              },
+              {
+                "line": 14,
+                "c": "  const token = await createPublicShareToken(id);"
+              },
+              {
+                "line": 15,
+                "c": "  res.json({ token });"
+              },
+              {
+                "line": 16,
+                "c": "}"
+              }
+            ]
+          }
+        },
+        {
+          "path": "tests/shareCVWithOrg.test.ts",
+          "line": 17,
+          "inPR": true,
+          "status": "test",
+          "context": {
+            "start": 15,
+            "end": 22,
+            "lines": [
+              {
+                "line": 15,
+                "c": "it(\"shares a CV with the actor's organization\", async () => {"
+              },
+              {
+                "line": 16,
+                "c": "  const cv = await createCV(adminUser);"
+              },
+              {
+                "line": 17,
+                "c": "  await shareCVWithOrg(cv.id, adminUser);"
+              },
+              {
+                "line": 18,
+                "c": "  const updated = await db.cvs.findUnique({ where: { id: cv.id } });"
+              },
+              {
+                "line": 19,
+                "c": "  expect(updated.organization_id).toBe(adminUser.organizationId);"
+              },
+              {
+                "line": 20,
+                "c": "});"
+              },
+              {
+                "line": 21,
+                "c": ""
+              },
+              {
+                "line": 22,
+                "c": "it(\"lets org members read a shared CV\", async () => {"
+              }
+            ]
+          }
+        }
+      ],
+      "notCallers": []
+    },
+    "fn-revokeOrgSharing": {
+      "name": "revokeOrgSharing",
+      "kind": "async function",
+      "signature": "revokeOrgSharing(cvId: string, actor: User): Promise<void>",
+      "defined": {
+        "line": 5,
+        "path": "services/cv/revokeOrgSharing.ts"
+      },
+      "summary": "Clears organization_id. Owner-only.",
+      "callers": [
+        {
+          "path": "api/cvs/[id]/revoke.ts",
+          "line": 12,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 12,
+            "end": 12,
+            "lines": [
+              {
+                "line": 12,
+                "c": "  await revokeOrgSharing(id, user);"
+              }
+            ]
+          }
+        }
+      ],
+      "notCallers": []
+    },
+    "fn-duplicateCV": {
+      "name": "duplicateCV",
+      "kind": "async function",
+      "signature": "duplicateCV(cvId: string, actor: User): Promise<CV>",
+      "defined": {
+        "line": 22,
+        "path": "services/cv/duplicateCV.ts"
+      },
+      "summary": "Creates a copy of a CV owned by the actor.",
+      "callers": [
+        {
+          "path": "api/cvs/[id]/duplicate.ts",
+          "line": 14,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 14,
+            "end": 14,
+            "lines": [
+              {
+                "line": 14,
+                "c": "  const copy = await duplicateCV(id, user);"
+              }
+            ]
+          }
+        },
+        {
+          "path": "components/CVRow.tsx",
+          "line": 88,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 88,
+            "end": 88,
+            "lines": [
+              {
+                "line": 88,
+                "c": "  onClick={() => fetch(`/api/cvs/${cv.id}/duplicate`, { method: \"POST\" })}"
+              }
+            ]
+          }
+        },
+        {
+          "path": "components/ShareMenu.tsx",
+          "line": 53,
+          "inPR": true,
+          "status": "touched",
+          "context": {
+            "start": 53,
+            "end": 53,
+            "lines": [
+              {
+                "line": 53,
+                "c": "  <MenuItem onClick={() => duplicateFromMenu(cvId)}>Duplicate</MenuItem>"
+              }
+            ]
+          }
+        },
+        {
+          "path": "tests/duplicateCV.test.ts",
+          "line": 11,
+          "inPR": false,
+          "status": "test",
+          "context": {
+            "start": 11,
+            "end": 11,
+            "lines": [
+              {
+                "line": 11,
+                "c": "  const copy = await duplicateCV(source.id, otherUser);"
+              }
+            ]
+          }
+        }
+      ],
+      "notCallers": []
+    },
+    "fn-getCVBadgeColor": {
+      "name": "getCVBadgeColor",
+      "kind": "function",
+      "signature": "getCVBadgeColor(v: CVVisibility): \"gray\" | \"blue\" | \"red\"",
+      "defined": {
+        "line": 40,
+        "path": "components/CVCard.tsx"
+      },
+      "summary": "Maps a CV's visibility to a Badge color. Switch with default fallback.",
+      "callers": [
+        {
+          "path": "components/CVCard.tsx",
+          "line": 29,
+          "inPR": true,
+          "status": "touched",
+          "context": {
+            "start": 26,
+            "end": 34,
+            "lines": [
+              {
+                "line": 26,
+                "c": "  return ("
+              },
+              {
+                "line": 27,
+                "c": "    <Card>"
+              },
+              {
+                "line": 28,
+                "c": "      <CVTitle cv={cv} />"
+              },
+              {
+                "line": 29,
+                "c": "      <Badge color={getCVBadgeColor(cv.visibility)} />"
+              },
+              {
+                "line": 30,
+                "c": "      {isOwner && ("
+              },
+              {
+                "line": 31,
+                "c": "        <ShareMenu"
+              },
+              {
+                "line": 32,
+                "c": "          cvId={cv.id}"
+              },
+              {
+                "line": 33,
+                "c": "          canShareWithOrg={!!user.organizationId}"
+              },
+              {
+                "line": 34,
+                "c": "        />"
+              }
+            ]
+          }
+        }
+      ],
+      "notCallers": []
+    },
+    "comp-ShareMenu": {
+      "name": "ShareMenu",
+      "kind": "react component",
+      "signature": "ShareMenu({ cvId, canShareWithOrg }: Props): JSX.Element",
+      "defined": {
+        "line": 13,
+        "path": "components/ShareMenu.tsx"
+      },
+      "summary": "Dropdown with Copy-link / Share-with-org / Duplicate / Revoke actions.",
+      "callers": [
+        {
+          "path": "components/CVCard.tsx",
+          "line": 31,
+          "inPR": true,
+          "status": "touched",
+          "context": {
+            "start": 28,
+            "end": 36,
+            "lines": [
+              {
+                "line": 28,
+                "c": "      <CVTitle cv={cv} />"
+              },
+              {
+                "line": 29,
+                "c": "      <Badge color={getCVBadgeColor(cv.visibility)} />"
+              },
+              {
+                "line": 30,
+                "c": "      {isOwner && ("
+              },
+              {
+                "line": 31,
+                "c": "        <ShareMenu"
+              },
+              {
+                "line": 32,
+                "c": "          cvId={cv.id}"
+              },
+              {
+                "line": 33,
+                "c": "          canShareWithOrg={!!user.organizationId}"
+              },
+              {
+                "line": 34,
+                "c": "        />"
+              },
+              {
+                "line": 35,
+                "c": "      )}"
+              },
+              {
+                "line": 36,
+                "c": "    </Card>"
+              }
+            ]
+          }
+        }
+      ],
+      "notCallers": []
+    },
+    "type-CVVisibility": {
+      "name": "CVVisibility",
+      "kind": "type alias",
+      "signature": "type CVVisibility = \"private\" | \"public\" | \"org-shared\"",
+      "defined": {
+        "line": 7,
+        "path": "constants/cv.ts"
+      },
+      "summary": "Union type derived from CV_VISIBILITY.",
+      "callers": [
+        {
+          "path": "components/CVCard.tsx",
+          "line": 40,
+          "inPR": true,
+          "status": "touched",
+          "context": {
+            "start": 37,
+            "end": 45,
+            "lines": [
+              {
+                "line": 37,
+                "c": "  );"
+              },
+              {
+                "line": 38,
+                "c": "}"
+              },
+              {
+                "line": 39,
+                "c": ""
+              },
+              {
+                "line": 40,
+                "c": "function getCVBadgeColor(v: CVVisibility) {"
+              },
+              {
+                "line": 41,
+                "c": "  switch (v) {"
+              },
+              {
+                "line": 42,
+                "c": "    case \"private\": return \"gray\";"
+              },
+              {
+                "line": 43,
+                "c": "    case \"public\":  return \"blue\";"
+              },
+              {
+                "line": 44,
+                "c": "    default:        return \"red\";   // error state"
+              },
+              {
+                "line": 45,
+                "c": "  }"
+              }
+            ]
+          }
+        },
+        {
+          "path": "services/cv/types.ts",
+          "line": 12,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 12,
+            "end": 12,
+            "lines": [
+              {
+                "line": 12,
+                "c": "  visibility: CVVisibility;"
+              }
+            ]
+          }
+        },
+        {
+          "path": "components/CVFilterBar.tsx",
+          "line": 28,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 28,
+            "end": 28,
+            "lines": [
+              {
+                "line": 28,
+                "c": "  const [filter, setFilter] = useState<CVVisibility | 'all'>('all');"
+              }
+            ]
+          }
+        },
+        {
+          "path": "api/cv/list.ts",
+          "line": 18,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 18,
+            "end": 18,
+            "lines": [
+              {
+                "line": 18,
+                "c": "  visibility?: CVVisibility;"
+              }
+            ]
+          }
+        },
+        {
+          "path": "tests/cv-list.test.ts",
+          "line": 22,
+          "inPR": false,
+          "status": "test",
+          "context": {
+            "start": 22,
+            "end": 22,
+            "lines": [
+              {
+                "line": 22,
+                "c": "  const cases: Array<[CVVisibility, number]> = [...]"
+              }
+            ]
+          }
+        }
+      ],
+      "notCallers": []
+    },
+    "tbl-cvs": {
+      "name": "cvs",
+      "kind": "db table",
+      "signature": "cvs · 14 columns · 12,418 rows in prod",
+      "defined": {
+        "line": 1,
+        "path": "schema.sql"
+      },
+      "summary": "Core CV table.",
+      "callers": [
+        {
+          "path": "services/cv/getCVById.ts",
+          "line": 12,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 12,
+            "end": 12,
+            "lines": [
+              {
+                "line": 12,
+                "c": "  return db.cvs.findUnique({ where: { id } });"
+              }
+            ]
+          }
+        },
+        {
+          "path": "api/cv/[id]/export.ts",
+          "line": 6,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 3,
+            "end": 11,
+            "lines": [
+              {
+                "line": 3,
+                "c": ""
+              },
+              {
+                "line": 4,
+                "c": "export default async function handler(req, res) {"
+              },
+              {
+                "line": 5,
+                "c": "  const { id } = req.query;"
+              },
+              {
+                "line": 6,
+                "c": "  const cv = await db.cvs.findUnique({ where: { id } });"
+              },
+              {
+                "line": 7,
+                "c": "  if (!cv) return res.status(404).end();"
+              },
+              {
+                "line": 8,
+                "c": ""
+              },
+              {
+                "line": 9,
+                "c": "  const pdf = await renderCVToPDF(cv);"
+              },
+              {
+                "line": 10,
+                "c": "  res.setHeader(\"Content-Type\", \"application/pdf\");"
+              },
+              {
+                "line": 11,
+                "c": "  res.send(pdf);"
+              }
+            ]
+          }
+        },
+        {
+          "path": "services/cv/listOrgCVs.ts",
+          "line": 9,
+          "inPR": true,
+          "status": "touched",
+          "context": {
+            "start": 9,
+            "end": 9,
+            "lines": [
+              {
+                "line": 9,
+                "c": "  return db.cvs.findMany({ where: { organization_id: user.organizationId } });"
+              }
+            ]
+          }
+        },
+        {
+          "path": "+ 18 more readers",
+          "line": 0,
+          "inPR": false,
+          "status": "untouched",
+          "context": {
+            "start": 1,
+            "end": 1,
+            "lines": [
+              {
+                "line": 1,
+                "c": "(collapsed — common reader patterns)"
+              }
+            ]
+          }
+        }
+      ],
+      "notCallers": []
+    }
+  },
+  "groups": [
+    {
+      "key": "Schema",
+      "label": "Schema",
+      "why": "the new column the rest of the PR reads"
+    },
+    {
+      "key": "Permissions",
+      "label": "Permissions",
+      "why": "what gates CV reads"
+    },
+    {
+      "key": "Services",
+      "label": "Services",
+      "why": "the writers"
+    },
+    {
+      "key": "API",
+      "label": "API",
+      "why": "where the services are called"
+    },
+    {
+      "key": "UI",
+      "label": "UI",
+      "why": "the visible surface"
+    },
+    {
+      "key": "Types",
+      "label": "Types",
+      "why": "shared type-level changes"
+    },
+    {
+      "key": "Tests",
+      "label": "Tests",
+      "why": "evidence"
+    }
+  ],
+  "overview": {
+    "mentalModelDelta": [
+      "CV reads move from owner/public-token only to a three-branch access model where ",
+      {
+        "type": "symbol",
+        "id": "fn-canViewCV",
+        "label": "canViewCV"
+      },
+      " also accepts organization membership via ",
+      {
+        "type": "symbol",
+        "id": "col-orgid",
+        "label": "organization_id"
+      },
+      "."
+    ],
+    "systemMap": {
+      "title": "Affected access model",
+      "kind": "ascii",
+      "lines": [
+        [
+          "CV record"
+        ],
+        [
+          "  owner_id"
+        ],
+        [
+          "  public token"
+        ],
+        [
+          "  organization_id"
+        ],
+        [
+          "        ↓"
+        ],
+        [
+          {
+            "type": "symbol",
+            "id": "fn-canViewCV",
+            "label": "canViewCV"
+          }
+        ],
+        [
+          "        ↓"
+        ],
+        [
+          "API read routes"
+        ]
+      ],
+      "refs": [
+        {
+          "type": "file",
+          "id": "services/cv/permissions/canViewCV.ts",
+          "label": "permission gate"
+        }
+      ]
+    },
+    "modelDeltas": [
+      {
+        "title": "Organization-scoped access",
+        "before": "A CV is readable by owner checks or public token checks.",
+        "after": "A CV can also be readable through organization membership when organization_id is set.",
+        "refs": [
+          {
+            "type": "symbol",
+            "id": "fn-canViewCV"
+          },
+          {
+            "type": "symbol",
+            "id": "col-orgid",
+            "label": "organization_id"
+          }
+        ]
+      },
+      {
+        "title": "Sharing writer",
+        "before": "No service-level writer assigns a CV to an organization.",
+        "after": "shareCVWithOrg and revokeOrgSharing become the write path for organization sharing state.",
+        "refs": [
+          {
+            "type": "symbol",
+            "id": "fn-shareCVWithOrg"
+          }
+        ]
+      }
+    ],
+    "flows": [
+      {
+        "title": "Read access model",
+        "kind": "before_after_ascii",
+        "before": [
+          [
+            "request -> ",
+            {
+              "type": "file",
+              "id": "services/cv/permissions/canViewCV.ts",
+              "label": "canViewCV.ts"
+            },
+            " -> owner?"
+          ],
+          [
+            "                 `-> public token?"
+          ],
+          [
+            "                 `-> otherwise deny"
+          ]
+        ],
+        "after": [
+          [
+            "request -> ",
+            {
+              "type": "symbol",
+              "id": "fn-canViewCV",
+              "label": "canViewCV"
+            },
+            " -> owner?"
+          ],
+          [
+            "                 |-> public token?"
+          ],
+          [
+            "                 `-> same ",
+            {
+              "type": "symbol",
+              "id": "col-orgid",
+              "label": "organization_id"
+            },
+            "?"
+          ]
+        ]
+      },
+      {
+        "title": "Sharing mutation path",
+        "kind": "before_after_ascii",
+        "before": [
+          [
+            "owner updates CV visibility locally"
+          ],
+          [
+            "no organization-scoped writer exists"
+          ]
+        ],
+        "after": [
+          [
+            "API route -> ",
+            {
+              "type": "symbol",
+              "id": "fn-shareCVWithOrg",
+              "label": "shareCVWithOrg"
+            },
+            " -> cvs.organization_id"
+          ],
+          [
+            "revoke   -> ",
+            {
+              "type": "symbol",
+              "id": "fn-revokeOrgSharing",
+              "label": "revokeOrgSharing"
+            },
+            " -> clear organization_id"
+          ]
+        ]
+      }
+    ],
+    "assumptions": [
+      {
+        "text": [
+          "Every code path that returns CV content routes through ",
+          {
+            "type": "symbol",
+            "id": "fn-canViewCV",
+            "label": "canViewCV"
+          },
+          " or intentionally has a stronger gate."
+        ],
+        "refs": [
+          {
+            "type": "symbol",
+            "id": "fn-canViewCV",
+            "label": "canViewCV"
+          },
+          {
+            "type": "decision",
+            "id": "dc-truth-1",
+            "label": "three read branches"
+          }
+        ]
+      },
+      {
+        "text": "Service writers are only reachable from API routes that already proved ownership or admin authority.",
+        "refs": [
+          {
+            "type": "symbol",
+            "id": "fn-shareCVWithOrg",
+            "label": "shareCVWithOrg"
+          },
+          {
+            "type": "decision",
+            "id": "dc-trust-1",
+            "label": "writer boundary"
+          }
+        ]
+      },
+      {
+        "text": "Duplicating a CV should not accidentally copy organization sharing unless that is intended product behavior.",
+        "refs": [
+          {
+            "type": "symbol",
+            "id": "fn-duplicateCV",
+            "label": "duplicateCV"
+          },
+          {
+            "type": "decision",
+            "id": "dc-lifecycle-2",
+            "label": "copy behavior"
+          }
+        ]
+      }
+    ],
+    "hotspots": [
+      {
+        "title": "Raw CV reads can bypass the new organization branch",
+        "why": [
+          "Inspect readers that fetch CVs directly instead of calling ",
+          {
+            "type": "symbol",
+            "id": "fn-canViewCV",
+            "label": "canViewCV"
+          },
+          "."
+        ],
+        "refs": [
+          {
+            "type": "decision",
+            "id": "dc-truth-1",
+            "label": "read branches"
+          },
+          {
+            "type": "file",
+            "id": "api/cv/[id]/export.ts",
+            "label": "export route"
+          }
+        ]
+      },
+      {
+        "title": "Ownership enforcement is split from service writers",
+        "why": "The service layer mutates organization sharing state, so API entrypoints must be the trust boundary.",
+        "refs": [
+          {
+            "type": "symbol",
+            "id": "fn-shareCVWithOrg",
+            "label": "shareCVWithOrg"
+          },
+          {
+            "type": "decision",
+            "id": "dc-trust-1",
+            "label": "trust boundary"
+          }
+        ]
+      }
+    ]
+  },
+  "reviewSignals": {
+    "version": 1,
+    "patterns": {
+      "user-new-service-imports": {
+        "id": "user-new-service-imports",
+        "label": "new service import block",
+        "source": "user",
+        "description": "In newly added service files, collapse only the initial import block when executable code starts below it."
+      }
+    },
+    "files": {
+      "services/cv/shareCVWithOrg.ts": {
+        "relevance": "normal",
+        "source": "ai",
+        "hideByDefault": false,
+        "categories": [],
+        "reason": "",
+        "ranges": [
+          {
+            "id": "noise-f-share-imports",
+            "relevance": "noise",
+            "source": "ai",
+            "kind": "mechanical-pattern",
+            "hideByDefault": true,
+            "reason": "Entspricht dem User-Pattern: nur der initiale Import-Block einer neuen Service-Datei.",
+            "patternId": "user-new-service-imports",
+            "anchor": {
+              "right": {
+                "start": 1,
+                "end": 3,
+                "textFingerprint": "af1-92w271y9uu",
+                "text": "import { db } from \"@/db\";\nimport { auditShareEvent } from \"./audit\";\nimport type { User } from \"@/types/user\";"
+              }
+            }
+          }
+        ]
+      },
+      "services/cv/revokeOrgSharing.ts": {
+        "relevance": "normal",
+        "source": "ai",
+        "hideByDefault": false,
+        "categories": [],
+        "reason": "",
+        "ranges": [
+          {
+            "id": "noise-f-revoke-imports",
+            "relevance": "noise",
+            "source": "deterministic",
+            "kind": "imports-only",
+            "hideByDefault": true,
+            "reason": "Nur neuer Import-Block; keine eigene Kontrollfluss- oder Datenmodelländerung.",
+            "anchor": {
+              "right": {
+                "start": 1,
+                "end": 3,
+                "textFingerprint": "af1-92w271y9uu",
+                "text": "import { db } from \"@/db\";\nimport { auditShareEvent } from \"./audit\";\nimport type { User } from \"@/types/user\";"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
