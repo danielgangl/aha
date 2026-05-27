@@ -324,15 +324,8 @@ export function FileCard({
           </button>
           <CopyPathButton path={file.path} copied={copiedPath} onCopy={copyFilePath} />
         </div>
-        {/* `.file-head .actions` */}
+        {/* `.file-head .actions` — badges, then +/- stat, then Viewed (rightmost) */}
         <div className="inline-flex min-w-max flex-shrink-0 items-center gap-[8px]">
-          <ViewedCheckbox
-            on={reviewed}
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggleReviewed(file);
-            }}
-          />
           {file.tag !== "modified" && (
             <FileTag kind={file.tag === "new" ? undefined : (file.tag as "unchanged")}>
               {file.tag === "new" ? "NEW" : "UNCHANGED"}
@@ -344,6 +337,13 @@ export function FileCard({
             </FileTag>
           )}
           <FileStat add={file.add ?? 0} del={file.del ?? 0} />
+          <ViewedCheckbox
+            on={reviewed}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleReviewed(file);
+            }}
+          />
         </div>
       </header>
 
