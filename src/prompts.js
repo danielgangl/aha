@@ -99,6 +99,7 @@ The fragment may contain these fields only:
    {
      "afterR": 123,
      "src": "kontext · ai",
+     "type": "risk",
      "html": "..."
    }
 
@@ -113,6 +114,11 @@ The fragment may contain these fields only:
    - Anchor only to line numbers that already exist in that file's diff.
    - Use afterR for added/context right-side lines.
    - Use afterL for deleted left-side lines.
+   - type is optional. Omit it for normal explanatory notes.
+   - Use "type": "risk" only when the exact changed line may introduce a bug, brittle behavior, missing guard, invariant break, data drift, permission issue, lifecycle issue, or test confidence problem.
+   - Use "type": "code-smell" only for maintainability concerns such as poorly abstracted functions, avoidable duplication, tight coupling, unclear ownership boundaries, or hard-to-change control flow.
+   - Do not label ordinary mental-model notes as risk or code-smell.
+   - Do not use risk/code-smell as generic emphasis; the type must change how a senior reviewer triages the line.
    - Optimize for senior-review time saved, not for a low note count.
    - Prefer hidden mental-model deltas, invariant drift, missing guards, lifecycle issues, test gaps, and non-obvious before/after behavior.
    - Do not add generic summary notes.
@@ -155,6 +161,8 @@ The fragment may contain these fields only:
    - "<p>Vorher war Material-Base hart <code>listSum / 1.15</code>; <code>materialBaseSum</code> macht die Basis pro Line überschreibbar, sodass DSM den Default behält und ModuLine eigene VK-Regeln nutzen kann.</p>"
    - "<p>Ändere beim Section-Wechsel nur die Referenz; <code>reconcileGateUpdate</code> entscheidet danach, ob DSM-Details bleiben oder ModuLine-Defaults entstehen.</p>"
    - "<p>Der DTO-Mapper leitet ModuLine-Gate-Höhe aus der Section ab; persistierter Gate-Height-State ist nicht mehr die Quelle der Wahrheit.</p>"
+   - type "risk": "<p>Diese Guard-Branch entscheidet jetzt, ob externe Training-Daten anwachsen; prüfe, ob alle Caller bewusst inaccessible Shops ausschließen.</p>"
+   - type "code-smell": "<p>Die neue Fallunterscheidung dupliziert dieselbe Shop-Filterlogik in zwei Callern; wenn weitere Trainingspfade dazukommen, driftet die Policy leicht auseinander.</p>"
 
    Bad examples:
    - "<p>This file handles validation.</p>"
@@ -858,6 +866,15 @@ Pass structure:
    Owns only:
    - overview
    - decisions
+
+Section index:
+- --- FRAGMENT MERGE CONTRACT ---
+- --- CODE CONTEXT PASS ---
+  Save only .aha/fragments/code-context.json.
+- --- REVIEW SIGNALS PASS ---
+  Save only .aha/fragments/review-signals.json.
+- --- REVIEW JUDGMENT PASS ---
+  Save only .aha/fragments/review-judgment.json.
 
 Workflow:
 0. Default to the current working repository and the current branch PR.

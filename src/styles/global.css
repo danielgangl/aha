@@ -428,7 +428,21 @@
     border-bottom: 1px dotted var(--blue);
   }
   .ai-note .text a.jump:hover { background: var(--blue-soft); }
-
+  .ai-note {
+    --ai-note-accent: var(--blue);
+    --ai-note-bg: color-mix(in oklab, var(--bg-3) 70%, var(--surface));
+    --ai-note-label: var(--ink-3);
+  }
+  .ai-note[data-note-type="risk"] {
+    --ai-note-accent: var(--rose);
+    --ai-note-bg: color-mix(in oklab, var(--rose-soft) 45%, var(--surface));
+    --ai-note-label: var(--rose-ink);
+  }
+  .ai-note[data-note-type="code-smell"] {
+    --ai-note-accent: var(--amber);
+    --ai-note-bg: color-mix(in oklab, var(--amber-soft) 42%, var(--surface));
+    --ai-note-label: var(--amber-ink);
+  }
   /* ─── High Level overview — preserved parent/sibling rules ───
      KEPT: `.overview-refs` carries the base flex/wrap/gap layout
      for a class still applied in JSX, and the system-map context

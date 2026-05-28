@@ -300,7 +300,7 @@ export function FileCard({
           Flash also animates the head (descendant selector) so it carries its
           own animate-[flashbg…] when flashing. */}
       <header
-        className={`sticky top-[var(--file-head-sticky-top,74px)] z-[2] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[16px] rounded-t-[9px] border-b border-[var(--line)] bg-[var(--bg-2)] px-[14px] py-[10px] group-data-[collapsed=true]/file:rounded-[9px] group-data-[collapsed=true]/file:border-b-0 ${flash ? "animate-[flashbg_1.6s_ease-out]" : ""}`}
+        className={`file-head sticky top-[var(--file-head-sticky-top,74px)] z-[3] grid grid-cols-[minmax(0,1fr)_auto] items-center gap-[16px] rounded-t-[9px] border-b border-[var(--line)] bg-[var(--bg-2)] px-[14px] py-[10px] group-data-[collapsed=true]/file:rounded-[9px] group-data-[collapsed=true]/file:border-b-0 ${flash ? "animate-[flashbg_1.6s_ease-out]" : ""}`}
       >
         <div className="flex min-w-0 items-center gap-[6px]">
           <button
@@ -349,7 +349,7 @@ export function FileCard({
 
       {/* `.file-note` — left blue rule + leading bullet dot (::before) */}
       {!collapsed && file.note && (
-        <div className="grid grid-cols-[6px_minmax(0,1fr)] items-start gap-[7px] border-b border-l-2 border-t border-b-[var(--line)] border-l-[var(--blue)] border-t-[color-mix(in_oklab,var(--line)_70%,transparent)] bg-[color-mix(in_oklab,var(--bg-3)_70%,var(--surface))] py-[6px] pl-[48px] pr-[16px] font-sans text-[12px] leading-[1.4] text-[var(--ink-2)] before:mt-[5px] before:h-[6px] before:w-[6px] before:rounded-full before:bg-[var(--blue)] before:content-['']">
+        <div className="file-note sticky top-[calc(var(--file-head-sticky-top,74px)+49px)] z-[2] grid grid-cols-[6px_minmax(0,1fr)] items-start gap-[7px] border-b border-l-2 border-t border-b-[var(--line)] border-l-[var(--blue)] border-t-[color-mix(in_oklab,var(--line)_70%,transparent)] bg-[color-mix(in_oklab,var(--bg-3)_70%,var(--surface))] py-[6px] pl-[48px] pr-[16px] font-sans text-[12px] leading-[1.4] text-[var(--ink-2)] before:mt-[5px] before:h-[6px] before:w-[6px] before:rounded-full before:bg-[var(--blue)] before:content-['']">
           <span className="file-note-text min-w-0" dangerouslySetInnerHTML={{ __html: file.note || "" }} />
         </div>
       )}

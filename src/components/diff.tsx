@@ -401,6 +401,8 @@ export function AiNote({
   onJumpToSymbol: SymbolHandler;
 }) {
   const ref = useRef<HTMLSpanElement | null>(null);
+  const noteType = noteTypeFor(note);
+  const noteSource = noteSourceFor(note, noteType);
   // Intercept clicks on jump-anchors inside the HTML payload.
   useEffect(() => {
     const el = ref.current;
@@ -428,19 +430,38 @@ export function AiNote({
     <div
       className="ai-note grid grid-cols-[42px_minmax(0,1fr)_42px_minmax(0,1fr)] max-[900px]:grid-cols-[42px_minmax(0,1fr)] my-[2px]"
       data-side={side}
+      data-note-type={noteType || undefined}
     >
       {/* leading dot drawn via ::before in CSS; rendered as a real element for parity */}
       <div
-        className={`${side === "left" ? "[grid-column:2/3] max-[900px]:[grid-column:2/-1]" : "[grid-column:4/5] max-[900px]:[grid-column:2/-1]"} px-[10px] py-[5px] grid grid-cols-[6px_minmax(0,1fr)_auto] gap-[7px] items-start max-w-none bg-[color-mix(in_oklab,var(--bg-3)_70%,var(--surface))] border border-[var(--line)] border-l-2 border-l-[var(--blue)] rounded-r-[6px] rounded-l-none`}
+        className={`ai-note-body ${side === "left" ? "[grid-column:2/3] max-[900px]:[grid-column:2/-1]" : "[grid-column:4/5] max-[900px]:[grid-column:2/-1]"} px-[10px] py-[5px] grid grid-cols-[6px_minmax(0,1fr)_auto] gap-[7px] items-start max-w-none bg-[var(--ai-note-bg)] border border-[var(--line)] border-l-2 border-l-[var(--ai-note-accent)] rounded-r-[6px] rounded-l-none`}
       >
-        <span className="w-[6px] h-[6px] mt-[5px] rounded-full bg-[var(--blue)]" />
+        <span className="ai-note-dot w-[6px] h-[6px] mt-[5px] rounded-full bg-[var(--ai-note-accent)]" />
         <span
           ref={ref}
           className="text font-sans text-[12px] text-[var(--ink-2)] leading-[1.4] min-w-0"
           dangerouslySetInnerHTML={{ __html: note.html }}
         />
-        <span className="font-mono text-[10.5px] leading-[1.4] text-[var(--ink-3)] whitespace-nowrap">{note.src}</span>
+        <span className="ai-note-src font-mono text-[10.5px] leading-[1.4] text-[var(--ai-note-label)] whitespace-nowrap">{noteSource}</span>
       </div>
     </div>
   );
+}
+
+function noteTypeFor(note: FileNote): "" | "risk" | "code-smell" {
+  if (note.type === "risk" || note.type === "code-smell") return note.type;
+  const source = String(note.src || "").trim().toLowerCase();
+  if (/^risk(\s|·|:|-|$)/.test(source)) return "risk";
+  if (/^(code-smell|code smell)(\s|·|:|-|$)/.test(source)) return "code-smell";
+  return "";
+}
+
+function noteSourceFor(note: FileNote, noteType: "" | "risk" | "code-smell"): string {
+  const source = String(note.src || "").trim();
+  if (!noteType) return source;
+  const displayType = noteType === "code-smell" ? "code smell" : "risk";
+  const strippedSource = source
+    .replace(/^(risk|code-smell|code smell)\s*(·|:|-)?\s*/i, "")
+    .trim();
+  return [displayType, strippedSource].filter(Boolean).join(" · ");
 }

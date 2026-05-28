@@ -310,7 +310,7 @@ function App({
     const briefing = briefingRef.current;
     if (!root || !briefing) return;
     const update = () => {
-      root.style.setProperty("--file-head-sticky-top", `${briefing.offsetHeight}px`);
+      root.style.setProperty("--file-head-sticky-top", "0px");
     };
     update();
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
@@ -501,7 +501,7 @@ function App({
           ) : (
             <>
               {/* Briefing strip — minimal, code-author-voice */}
-              <div className="sticky top-0 z-[8] bg-paper border-b border-line py-[14px] px-[24px] flex flex-wrap gap-y-[16px] gap-x-[24px] items-start justify-between" ref={briefingRef}>
+              <div className="bg-paper border-b border-line py-[14px] px-[24px] flex flex-wrap gap-y-[16px] gap-x-[24px] items-start justify-between" ref={briefingRef}>
                 <div className="flex gap-[14px] items-start min-w-0 flex-[1_1_360px]">
                   <div aria-hidden="true" className="w-[30px] h-[30px] rounded-[8px] grid place-items-center bg-surface border border-line-2 text-ink text-[15px] leading-none shrink-0 shadow-[0_1px_0_color-mix(in_oklab,var(--color-surface)_60%,#fff),0_10px_22px_-16px_color-mix(in_oklab,var(--color-blue)_60%,transparent)]">◇</div>
                   <div>

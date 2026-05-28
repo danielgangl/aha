@@ -175,6 +175,7 @@ test("merge combines AI fragment files without rewriting deterministic diff trut
       notes: [{
         afterR: 5,
         src: "kontext · ai",
+        type: "risk",
         html: "<p><code>materialBaseSum</code> macht den alten Default überschreibbar.</p>",
       }],
     }],
@@ -236,6 +237,7 @@ test("merge combines AI fragment files without rewriting deterministic diff trut
   const pricing = merged.files.find((file) => file.path === "src/pricing.ts");
   assert.equal(pricing.note, "<p>Materialbasis wird pro Zeile erklärbar.</p>");
   assert.equal(pricing.notes.length, 1);
+  assert.equal(pricing.notes[0].type, "risk");
   assert.ok(pricing.notes[0].anchor?.textFingerprint);
   assert.equal(merged.readingOrders[0].groups[0].files[0], "src/pricing.ts");
   assert.ok(merged.reviewSignals.files["test/pricing.test.mjs"].ranges[0].anchor.right.textFingerprint);
@@ -396,7 +398,7 @@ async function runAha(fixture, args) {
   const { stdout, stderr } = await execFileAsync("node", [ahaBin, ...args], {
     cwd: fixture.repo,
     env: fixture.env,
-    maxBuffer: 16 * 1024 * 1024,
+    maxBuffer: 64 * 1024 * 1024,
   });
   return { stdout, stderr };
 }

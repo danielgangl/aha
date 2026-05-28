@@ -24,6 +24,7 @@ export interface DiffLine {
 export interface FileNote {
   html: string;
   src?: string;
+  type?: "risk" | "code-smell" | string;
   afterL?: number | null;
   afterR?: number | null;
 }
