@@ -296,6 +296,7 @@ test("prompt prints substituted full workflow instructions", async () => {
   assert.match(initPrompt, /--- REVIEW JUDGMENT PASS ---/);
   assert.match(initPrompt, /--- FRAGMENT MERGE CONTRACT ---/);
   assert.match(initPrompt, /"\$AHA_CLI" merge --pack "\$PACK_PATH" --fragments \.aha\/fragments\/code-context\.json,\.aha\/fragments\/review-signals\.json,\.aha\/fragments\/review-judgment\.json/);
+  assert.match(initPrompt, /If the user explicitly asks, you can start the viewer/);
   assert.match(initPrompt, /"\$AHA_CLI" serve --pack "\$PACK_PATH" --port 4173 --host 127\.0\.0\.1/);
   assert.match(initPrompt, /do not use `nohup \.\.\. &`/);
   assert.doesNotMatch(initPrompt, /nohup "\$AHA_CLI"/);

@@ -893,7 +893,7 @@ ${AHA_FRAGMENT_PATHS.map((fragmentPath) => `   - ${fragmentPath}`).join("\n")}
 6. Run:
    "$AHA_CLI" normalize --pack "$PACK_PATH"
 7. Parse the JSON again.
-8. Optionally start the viewer in a persistent terminal/session:
+8. If the user explicitly asks, you can start the viewer in a persistent terminal/session:
    "$AHA_CLI" serve --pack "$PACK_PATH" --port 4173 --host 127.0.0.1
    - Keep this process running. In Codex-like tool environments, do not use \`nohup ... &\`; short-lived shell background processes may be cleaned up when the tool call exits.
    - If port 4173 is busy, use the URL printed by the server.
