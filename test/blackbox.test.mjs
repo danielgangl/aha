@@ -365,6 +365,91 @@ test("prompt prints substituted full workflow instructions", async () => {
   assert.match(updatePrompt, /updateReport\.backupPath/);
 });
 
+test("update carries overview forward with stable, position-independent ids", async () => {
+  const assumptionA = {
+    text: "Bestehender Default bleibt erhalten.",
+    refs: [],
+    evidence: [{ path: "src/pricing.ts", line: 18, ref: "src/pricing.ts:18", desc: "Fallback" }],
+    check: "Bleibt der alte Default wirklich erhalten?",
+  };
+  const assumptionB = { id: "assumption-author-kept", text: "Autor-ID bleibt stabil.", refs: [] };
+  const hotspot = {
+    title: "Aggregation prüfen",
+    why: "Drift möglich",
+    refs: [],
+    evidence: [{ path: "test/pricing.test.mjs", line: 5, ref: "test/pricing.test.mjs:5", desc: "Source-Text-Test" }],
+    check: "Deckt der Test das Laufzeitverhalten ab?",
+  };
+
+  // The deterministic `update` carries the existing overview forward via
+  // preserveOverview — the path where positional ids used to desync triage.
+  const updateWithOverview = async (assumptions) => {
+    const fixture = await createBlackboxFixture({ patch: PATCH_V1 });
+    const { stdout } = await runAha(fixture, ["generate", "--pr", "42"]);
+    const packPath = stdout.trim().split(/\n/).at(-1);
+    const pack = await readJson(packPath);
+    pack.overview = { mentalModelDelta: "x", flows: [], modelDeltas: [], assumptions, hotspots: [hotspot] };
+    await writeJson(packPath, pack);
+    await runAha(fixture, ["update", "--pr", "42", "--pack", packPath]);
+    return readJson(packPath);
+  };
+
+  const first = await updateWithOverview([assumptionA, assumptionB]);
+  const second = await updateWithOverview([assumptionB, assumptionA]); // reordered
+
+  const idA1 = first.overview.assumptions.find((a) => a.text === assumptionA.text).id;
+  const idA2 = second.overview.assumptions.find((a) => a.text === assumptionA.text).id;
+
+  // Author-provided id is preserved verbatim.
+  assert.equal(first.overview.assumptions.find((a) => a.text === assumptionB.text).id, "assumption-author-kept");
+  // Content-anchored, never positional.
+  assert.ok(!/^overview-assumption-\d+$/.test(idA1), `expected content-anchored id, got ${idA1}`);
+  assert.ok(idA1.startsWith("assumption-"));
+  assert.ok(first.overview.hotspots[0].id.startsWith("hotspot-"));
+  // Position-independent: same concern -> same id regardless of list order.
+  assert.equal(idA1, idA2);
+  // Uniform worklist payload (evidence + check) survives normalize.
+  assert.equal(first.overview.assumptions.find((a) => a.text === assumptionA.text).evidence[0].path, "src/pricing.ts");
+  assert.equal(first.overview.hotspots[0].check, hotspot.check);
+});
+
+test("review state PUT keeps baselines only for triaged items", async () => {
+  const fixture = await createBlackboxFixture({ patch: PATCH_V1 });
+  await runAha(fixture, ["generate", "--pr", "42"]);
+  const port = await freePort();
+  const child = spawn("node", [ahaBin, "serve", "--port", String(port)], {
+    cwd: fixture.repo,
+    env: fixture.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  try {
+    const index = await waitForJson(`http://127.0.0.1:${port}/aha-packs.json`);
+    const packId = index.packs[0].id;
+    const url = `http://127.0.0.1:${port}/aha-state.json?pack=${encodeURIComponent(packId)}`;
+    const baseline = { lens: "decide", title: "Old A", body: "old claim", check: "still right?", at: "2026-05-29T00:00:00.000Z" };
+    const put = await putJson(url, {
+      schemaVersion: "0.2",
+      viewed: [],
+      viewedFiles: {},
+      decisions: { "dc-keep": "flag" },
+      baselines: {
+        "dc-keep": baseline,
+        "dc-orphan": { lens: "verify", title: "no triage", body: "", check: "", at: "2026-05-29T00:00:00.000Z" },
+      },
+      updatedAt: "2026-05-29T00:00:00.000Z",
+    });
+    assert.ok(put.ok);
+
+    const state = await getJson(url);
+    assert.equal(state.decisions["dc-keep"], "flag");
+    assert.deepEqual(state.baselines["dc-keep"], baseline);
+    // A baseline whose item is not triaged is dropped on save.
+    assert.equal(state.baselines["dc-orphan"], undefined);
+  } finally {
+    child.kill();
+  }
+});
+
 async function createBlackboxFixture({ patch }) {
   const temp = await mkdtemp(path.join(os.tmpdir(), "aha-blackbox-"));
   const repo = path.join(temp, "target");
@@ -498,6 +583,41 @@ function getJson(url) {
         }
       });
     }).on("error", reject);
+  });
+}
+
+function putJson(url, value) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(value);
+    const target = new URL(url);
+    const req = http.request(
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname + target.search,
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(data) },
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => { body += chunk; });
+        res.on("end", () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            reject(new Error(`HTTP ${res.statusCode}: ${body}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(body));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      },
+    );
+    req.on("error", reject);
+    req.write(data);
+    req.end();
   });
 }
 
