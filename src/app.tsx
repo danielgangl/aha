@@ -6,6 +6,7 @@ import type {
   CodeViewGroup,
   DiffLine,
   FileSignal,
+  FocusBaseline,
   NoiseMode,
   Overview,
   PackIndexEntry,
@@ -40,6 +41,7 @@ import {
   dirname,
 } from "./lib/pack";
 import { plainDiffContent } from "./lib/diff";
+import { focusItemSnapshot, indexFocusItems } from "./lib/review-focus";
 import { CallSitesPanel } from "./components/call-sites";
 import { FileDiffPanel } from "./components/file-panel";
 import { FileCard } from "./components/file-card";
@@ -64,18 +66,14 @@ function App({
   runtime = DEFAULT_RUNTIME,
   initialReviewState,
   initialReviewStateAvailable,
-  packIndex,
   selectedPackId,
-  onSelectPack,
   onHome,
 }: {
   pr: Pr;
   runtime?: Runtime;
   initialReviewState: ReviewState | null;
   initialReviewStateAvailable: boolean;
-  packIndex: PackIndexEntry[];
   selectedPackId: string;
-  onSelectPack: (id: string) => void;
   onHome: () => void;
 }) {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -115,6 +113,9 @@ function App({
   const [mode, setMode] = useState<Mode>("high-level");
   // Triage state per decision card. null = open; "accept" | "flag" | "block".
   const [decisionStatus, setDecisionStatus] = useState<StatusMap>(() => startingReviewState.decisions);
+  // Per-item "A" baseline — the content snapshot taken when the reviewer triaged.
+  const [baselines, setBaselines] = useState<Record<string, FocusBaseline>>(() => startingReviewState.baselines);
+  const focusIndex = useMemo(() => indexFocusItems(pr.decisions, pr.overview), [pr]);
   const [readingMode, setReadingMode] = useState(initialReadingMode);
   // Two independent rail filters, both default off so the list starts as a
   // burn-down of what's left: viewed files hidden (re-check to bring them
@@ -175,10 +176,11 @@ function App({
       viewed: Array.from(reviewed),
       viewedFiles: viewedFileMap,
       decisions: decisionStatus,
+      baselines,
       updatedAt: new Date().toISOString(),
     };
     persistReviewState(reviewStateKey, state, selectedPackId);
-  }, [decisionStatus, reviewed, selectedPackId, viewedFileMap, reviewStateKey]);
+  }, [decisionStatus, baselines, reviewed, selectedPackId, viewedFileMap, reviewStateKey]);
 
   const onSymbol = useCallback((id: string) => {
     setActiveSymId(id);
@@ -300,7 +302,15 @@ function App({
       else delete next[cardId];
       return next;
     });
-  }, []);
+    // Triaging (re)baselines the item to current content; clearing drops it.
+    setBaselines((prev) => {
+      const next = { ...prev };
+      const item = focusIndex.get(cardId);
+      if (s && item) next[cardId] = focusItemSnapshot(item, new Date().toISOString());
+      else delete next[cardId];
+      return next;
+    });
+  }, [focusIndex]);
 
 
   const onRailResizeStart = useCallback((event: React.PointerEvent) => {
@@ -410,20 +420,6 @@ function App({
           <span aria-hidden="true" className="w-[14px] h-[14px] rounded-[4px] bg-ink relative before:content-[''] before:absolute before:inset-[3px] before:border-[1.5px] before:border-rail before:rounded-[1px]" />
           <span>aha</span>
         </button>
-        {packIndex.length > 0 && (
-          <select
-            className="h-[26px] max-w-[300px] rounded-[6px] border border-line bg-bg-3 px-[8px] font-mono text-[11px] text-ink-2 outline-none hover:border-line-2 focus:border-blue focus:text-ink"
-            value={selectedPackId}
-            onChange={(event) => onSelectPack(event.target.value)}
-            title="Select aha pack"
-          >
-            {packIndex.map((pack) => (
-              <option key={pack.id} value={pack.id}>
-                {pack.repo} #{pack.pr} · {pack.title}
-              </option>
-            ))}
-          </select>
-        )}
         <div className="inline-flex items-center gap-[6px] text-ink-3 text-[12.5px]">
           <span className="text-ink-2">{repositoryName}</span>
           <span className="text-ink-4">/</span>
@@ -565,6 +561,7 @@ function App({
               files={pr.files}
               symbols={pr.symbols}
               statusMap={decisionStatus}
+              baselines={baselines}
               setStatus={setStatus}
               flashId={decisionFlashId}
               onSymbol={onSymbol}
@@ -764,9 +761,7 @@ function AhaLoader() {
       runtime={state.runtime}
       initialReviewState={state.reviewState}
       initialReviewStateAvailable={state.reviewStateAvailable}
-      packIndex={state.packIndex}
       selectedPackId={state.selectedPackId}
-      onSelectPack={navigate}
       onHome={() => navigate("")}
     />
   );
@@ -804,6 +799,10 @@ function normalizePackIndex(value: unknown): PackIndexEntry[] {
       updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
       filesChanged: Number.isFinite(Number(entry.filesChanged)) ? Number(entry.filesChanged) : 0,
       reviewed: Number.isFinite(Number(entry.reviewed)) ? Number(entry.reviewed) : 0,
+      focusTotal: Number.isFinite(Number(entry.focusTotal)) ? Number(entry.focusTotal) : 0,
+      focusDecided: Number.isFinite(Number(entry.focusDecided)) ? Number(entry.focusDecided) : 0,
+      focusFlagged: Number.isFinite(Number(entry.focusFlagged)) ? Number(entry.focusFlagged) : 0,
+      focusBlocked: Number.isFinite(Number(entry.focusBlocked)) ? Number(entry.focusBlocked) : 0,
     }))
     .filter((entry) => entry.id);
 }
@@ -1068,12 +1067,13 @@ function rangeLineCount(range: SignalRange): number {
 
 function normalizeOverview(overview: any, canonicalFileId: IdentityFileId = identityFileId): Overview | null {
   if (!overview || typeof overview !== "object") return null;
+  const usedIds = new Set<string>();
   return {
     mentalModelDelta: normalizeRichText(overview.mentalModelDelta, canonicalFileId),
     systemMap: normalizeSystemMap(overview.systemMap, canonicalFileId),
     modelDeltas: Array.isArray(overview.modelDeltas)
-      ? overview.modelDeltas.map((item: any, index: number) => ({
-        id: normalizeOverviewItemId(item, "model-delta", index),
+      ? overview.modelDeltas.map((item: any) => ({
+        id: normalizeOverviewItemId(item, "model-delta", usedIds),
         title: normalizeRichText(item?.title, canonicalFileId),
         before: normalizeRichText(item?.before, canonicalFileId),
         after: normalizeRichText(item?.after, canonicalFileId),
@@ -1090,18 +1090,22 @@ function normalizeOverview(overview: any, canonicalFileId: IdentityFileId = iden
       })).filter((flow: any) => flow.lines.length || flow.before.length || flow.after.length)
       : [],
     assumptions: Array.isArray(overview.assumptions)
-      ? overview.assumptions.map((item: any, index: number) => ({
-        id: normalizeOverviewItemId(item, "assumption", index),
+      ? overview.assumptions.map((item: any) => ({
+        id: normalizeOverviewItemId(item, "assumption", usedIds),
         text: normalizeRichText(item?.text, canonicalFileId),
         refs: normalizeRefs(item?.refs, canonicalFileId),
+        evidence: normalizeFocusEvidence(item?.evidence, canonicalFileId),
+        check: typeof item?.check === "string" ? item.check : undefined,
       }))
       : [],
     hotspots: Array.isArray(overview.hotspots)
-      ? overview.hotspots.map((item: any, index: number) => ({
-        id: normalizeOverviewItemId(item, "hotspot", index),
+      ? overview.hotspots.map((item: any) => ({
+        id: normalizeOverviewItemId(item, "hotspot", usedIds),
         title: normalizeRichText(item?.title, canonicalFileId),
         why: normalizeRichText(item?.why, canonicalFileId),
         refs: normalizeRefs(item?.refs, canonicalFileId),
+        evidence: normalizeFocusEvidence(item?.evidence, canonicalFileId),
+        check: typeof item?.check === "string" ? item.check : undefined,
       }))
       : [],
   };
@@ -1117,9 +1121,55 @@ function normalizeSystemMap(systemMap: any, canonicalFileId: IdentityFileId = id
   return { title, kind, lines, refs };
 }
 
-function normalizeOverviewItemId(item: any, kind: string, index: number): string {
-  if (typeof item?.id === "string" && item.id.trim()) return item.id.trim();
-  return `overview-${kind}-${index + 1}`;
+// Stable, content-anchored id (mirrors bin/aha.mjs overviewItemId). Author id
+// wins; otherwise anchor on the primary evidence file + a short topic slug so the
+// id tracks the concern, not its list position. Keeps triage state from sticking
+// to a slot across regenerations. The CLI normalize bakes this id into the pack,
+// so this client path is a parity fallback for un-normalized data.
+function normalizeOverviewItemId(item: any, kind: string, used: Set<string>): string {
+  const author = typeof item?.id === "string" && item.id.trim() ? item.id.trim() : "";
+  const base = author || contentAnchoredOverviewId(item, kind);
+  let id = base;
+  let n = 2;
+  while (used.has(id)) {
+    id = `${base}-${n}`;
+    n += 1;
+  }
+  used.add(id);
+  return id;
+}
+
+function contentAnchoredOverviewId(item: any, kind: string): string {
+  const evidence = Array.isArray(item?.evidence) ? item.evidence : [];
+  const anchor = evidence.find((entry: any) => entry && (entry.path || entry.fileId));
+  const fileStem = anchor ? idSlug(stemOfPath(anchor.path || anchor.fileId)) : "";
+  const topic = topicSlug(item?.title != null ? item.title : item?.text);
+  const parts = [kind, fileStem, topic].filter(Boolean);
+  return parts.length > 1 ? parts.join("-") : `${kind}-item`;
+}
+
+function rawRichToText(value: any): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((part: any) => (typeof part === "string" ? part : (part && (part.label || part.id)) || "")).join(" ");
+  }
+  return "";
+}
+
+function topicSlug(value: any): string {
+  return idSlug(rawRichToText(value)).split("-").filter(Boolean).slice(0, 4).join("-");
+}
+
+function idSlug(value: any): string {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function stemOfPath(filePath: string): string {
+  const base = String(filePath).split("/").pop() || "";
+  return base.replace(/\.[^.]+$/, "");
 }
 
 function normalizeRichText(value: any, canonicalFileId: IdentityFileId = identityFileId): RichTextValue {
@@ -1194,6 +1244,14 @@ function normalizeDecisionQuestions(questions: any, canonicalFileId: IdentityFil
       ? question.jumps.map((jump: any) => normalizeDecisionJump(jump, canonicalFileId))
       : question?.jumps,
   }));
+}
+
+function normalizeFocusEvidence(evidence: any, canonicalFileId: IdentityFileId = identityFileId): any[] | undefined {
+  if (!Array.isArray(evidence)) return undefined;
+  const items = evidence
+    .filter((item) => item && typeof item === "object")
+    .map((item: any) => normalizeDecisionJump(item, canonicalFileId));
+  return items.length ? items : undefined;
 }
 
 function normalizeDecisionJump(item: any, canonicalFileId: IdentityFileId = identityFileId): any {
@@ -1516,7 +1574,22 @@ function normalizeReviewState(input: any, pr: Pr): ReviewState {
       }
     }
   }
-  return { viewed: Array.from(viewed), viewedFiles, changedViewed: Array.from(changedViewed), decisions };
+  const baselines: Record<string, FocusBaseline> = {};
+  if (input?.baselines && typeof input.baselines === "object") {
+    for (const [id, raw] of Object.entries(input.baselines as Record<string, any>)) {
+      // Only keep baselines for items still triaged — a dropped triage has no baseline.
+      if (!decisions[id] || !raw || typeof raw !== "object") continue;
+      const lens = raw.lens === "decide" || raw.lens === "inspect" || raw.lens === "verify" ? raw.lens : "decide";
+      baselines[id] = {
+        lens,
+        title: typeof raw.title === "string" ? raw.title : "",
+        body: typeof raw.body === "string" ? raw.body : "",
+        check: typeof raw.check === "string" ? raw.check : "",
+        at: typeof raw.at === "string" ? raw.at : "",
+      };
+    }
+  }
+  return { viewed: Array.from(viewed), viewedFiles, changedViewed: Array.from(changedViewed), decisions, baselines };
 }
 
 function readLocalReviewState(pr: Pr, reviewStateKey: string, legacyReviewStateStorageKey: string, legacyStatusStorageKey: string): ReviewState {
@@ -1528,6 +1601,7 @@ function readLocalReviewState(pr: Pr, reviewStateKey: string, legacyReviewStateS
     viewed: state.viewed,
     viewedFiles: state.viewedFiles,
     decisions: { ...legacyDecisions, ...(state.decisions || {}) },
+    baselines: state.baselines,
     updatedAt: state.updatedAt,
   }, pr);
 }

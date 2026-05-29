@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type {
   DecisionCardData,
   DecisionCategory,
@@ -13,6 +14,7 @@ import type {
   TriageStatus,
 } from "./types";
 import { DiffExcerpt } from "./components/diff";
+import { InlineText } from "./components/rich";
 
 // v2/decisions.jsx — Decisions Mode.
 // Decision Cards stacked vertically. Each card states a decision/claim,
@@ -191,7 +193,9 @@ function EvidenceRow({
             {item?.ref}
           </span>
           {item?.desc && (
-            <span className="text-[12px] leading-[1.45] text-ink-2 [text-wrap:pretty]">{item.desc}</span>
+            <span className="text-[12px] leading-[1.45] text-ink-2 [text-wrap:pretty]">
+              <InlineText text={item.desc} />
+            </span>
           )}
         </div>
         {isLink && (
@@ -275,7 +279,7 @@ export function ResolveZone({
         {question ? (
           <>
             <span className="block text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3 mb-[2px]">Decide</span>
-            <span className="text-[13px] leading-[1.45] text-ink font-medium [text-wrap:pretty]">{question}</span>
+            <span className="text-[13px] leading-[1.45] text-ink font-medium [text-wrap:pretty]"><InlineText text={question} /></span>
           </>
         ) : (
           <span className="text-[12px] text-ink-3">Your call</span>
@@ -301,6 +305,7 @@ function DecisionCard({
   symbols,
   onSymbol,
   lens,
+  topBanner,
 }: {
   card: DecisionCardData;
   categories: DecisionCategory[];
@@ -315,6 +320,8 @@ function DecisionCard({
   symbols?: SymbolMap;
   onSymbol?: SymbolHandler;
   lens?: Lens;
+  // Optional strip rendered inside the card, above the head (re-review provenance).
+  topBanner?: ReactNode;
 }) {
   const sections = Array.isArray(card.sections) ? card.sections : [];
   const checkSection = sections.find((sec) => sec.kind === "check");
@@ -351,6 +358,7 @@ function DecisionCard({
       id={card.id}
       data-risk={card.risk}
     >
+      {topBanner}
       <CardHead>
         <div className="flex gap-[6px] flex-wrap items-center">
           {lens && <LensPill lens={lens} />}
@@ -361,15 +369,17 @@ function DecisionCard({
       </CardHead>
 
       <h3 className="font-sans font-semibold text-base leading-[1.3] tracking-[-0.008em] text-ink mt-[6px] mb-2">
-        {card.title}
+        <InlineText text={card.title} />
       </h3>
-      <p className="text-[13.5px] leading-[1.55] text-ink mt-0 mb-[10px] [text-wrap:pretty]">{card.claim}</p>
+      <p className="text-[13.5px] leading-[1.55] text-ink mt-0 mb-[10px] [text-wrap:pretty]">
+        <InlineText text={card.claim} />
+      </p>
       {card.whyItMatters && (
         <p className="text-[12.5px] leading-[1.55] text-ink-2 mt-0 mb-3 [text-wrap:pretty] pl-3 border-l-2 border-line-2">
           <span className="block text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3 mb-1">
             Why it matters
           </span>
-          {card.whyItMatters}
+          <InlineText text={card.whyItMatters} />
         </p>
       )}
 
@@ -434,7 +444,7 @@ function QuestionsList({ questions, onJump }: { questions: DecisionQuestion[]; o
             {i + 1}
           </span>
           <div className="flex flex-col gap-[7px]">
-            <div className="text-[13.5px] leading-[1.5] text-ink font-sans [text-wrap:pretty]">{q.text}</div>
+            <div className="text-[13.5px] leading-[1.5] text-ink font-sans [text-wrap:pretty]"><InlineText text={q.text} /></div>
             <div className="flex gap-[6px] flex-wrap">
               {(Array.isArray(q.jumps) ? q.jumps : []).filter(Boolean).map((j, k) => (
                 <button
@@ -683,4 +693,4 @@ function DecisionsView({
   );
 }
 
-export { DecisionCard, DecisionsView, DecisionsLeftRail };
+export { DecisionCard, DecisionsView, DecisionsLeftRail, EvidenceRow, SectionBlock };

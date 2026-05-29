@@ -15,7 +15,7 @@ function statusLabelFor(status: TriageStatus): string {
   return status === "block" ? "BLOCKER / declined" : status === "flag" ? "FLAGGED for discussion" : "open";
 }
 
-function richTextToPlain(value: RichText): string {
+export function richTextToPlain(value: RichText): string {
   if (typeof value === "string") return value;
   if (!Array.isArray(value)) return "";
   return value.map((part) => (typeof part === "string" ? part : part?.label || part?.id || "")).join("");
@@ -24,6 +24,23 @@ function richTextToPlain(value: RichText): string {
 function refsToPlain(refs: RichRef[] | undefined): string {
   if (!Array.isArray(refs)) return "";
   return refs.map((ref) => ref.label || ref.id).filter(Boolean).join(", ");
+}
+
+// Append a list of evidence anchors (location + ±3-line code window) to an
+// agent-context buffer. Shared by decisions, hotspots and assumptions so every
+// lens hands over the same evidence shape.
+function pushEvidence(out: string[], items: DecisionJump[], files: PackFile[]): void {
+  const evidence = (Array.isArray(items) ? items : []).filter(Boolean);
+  if (!evidence.length) return;
+  out.push("", "Evidence:");
+  for (const it of evidence) {
+    const path = it.path || it.fileId || "";
+    const loc = path ? `${path}${it.line != null ? `:${it.line}` : ""}` : "";
+    const head = [it.ref, loc].filter(Boolean).join("  ") || "(no location)";
+    out.push(`- ${head}${it.desc ? ` — ${it.desc}` : ""}`);
+    const code = evidenceCodeText(it, files);
+    if (code) out.push(code);
+  }
 }
 
 // A small code window (±3 lines) around an evidence anchor, as plain text.
@@ -70,38 +87,30 @@ export function buildDecisionAgentContext(
   if (card.claim) out.push("", card.claim);
   if (card.whyItMatters) out.push("", `Why it matters: ${card.whyItMatters}`);
   if (check?.text) out.push("", `Decision to make: ${check.text}`);
-  if (evidence.length) {
-    out.push("", "Evidence:");
-    for (const sec of evidence) {
-      for (const it of (sec.items || []).filter(Boolean)) {
-        const path = it.path || it.fileId || "";
-        const loc = path ? `${path}${it.line != null ? `:${it.line}` : ""}` : "";
-        const head = [it.ref, loc].filter(Boolean).join("  ") || "(no location)";
-        out.push(`- ${head}${it.desc ? ` — ${it.desc}` : ""}`);
-        const code = evidenceCodeText(it, files);
-        if (code) out.push(code);
-      }
-    }
-  }
+  pushEvidence(out, evidence.flatMap((sec) => sec.items || []), files);
   return out.join("\n").trim();
 }
 
-export function buildHotspotAgentContext(hotspot: OverviewHotspot, status: TriageStatus): string {
+export function buildHotspotAgentContext(hotspot: OverviewHotspot, status: TriageStatus, files: PackFile[]): string {
   const out: string[] = [`Review hotspot (inspect) — ${statusLabelFor(status)}`];
   const title = richTextToPlain(hotspot.title);
   if (title) out.push(title);
   const why = richTextToPlain(hotspot.why);
   if (why) out.push("", why);
+  if (hotspot.check) out.push("", `Confirm: ${hotspot.check}`);
   const refs = refsToPlain(hotspot.refs);
   if (refs) out.push("", `Refs: ${refs}`);
+  pushEvidence(out, hotspot.evidence || [], files);
   return out.join("\n").trim();
 }
 
-export function buildAssumptionAgentContext(assumption: OverviewAssumption, status: TriageStatus): string {
+export function buildAssumptionAgentContext(assumption: OverviewAssumption, status: TriageStatus, files: PackFile[]): string {
   const out: string[] = [`Review assumption (verify) — ${statusLabelFor(status)}`];
   const text = richTextToPlain(assumption.text);
   if (text) out.push(text);
+  if (assumption.check) out.push("", `Verify: ${assumption.check}`);
   const refs = refsToPlain(assumption.refs);
   if (refs) out.push("", `Refs: ${refs}`);
+  pushEvidence(out, assumption.evidence || [], files);
   return out.join("\n").trim();
 }

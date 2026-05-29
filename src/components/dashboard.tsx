@@ -84,11 +84,33 @@ export function Dashboard({
   );
 }
 
+// One compact labelled progress bar on a pack card. `accent` (flagged+blocked)
+// shows a red "needs action" count.
+function CardMetric({ label, value, total, accent = 0 }: { label: string; value: number; total: number; accent?: number }) {
+  const pct = total > 0 ? Math.min(100, (value / total) * 100) : 0;
+  const done = total > 0 && value >= total;
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center justify-between gap-2 mb-[3px]">
+        <span className="text-[9px] font-semibold uppercase tracking-[0.05em] text-ink-4">{label}</span>
+        <span className="font-mono text-[10px] [font-variant-numeric:tabular-nums] text-ink-3">
+          {total === 0 ? "—" : done ? "✓" : `${value}/${total}`}
+          {accent > 0 && <span className="text-rose-ink"> · {accent}!</span>}
+        </span>
+      </div>
+      <span className="block h-1 bg-bg-3 rounded-[2px] overflow-hidden">
+        <span className={`block h-full rounded-[2px] ${done ? "bg-pine" : "bg-ink"}`} style={{ width: `${pct}%` }} />
+      </span>
+    </div>
+  );
+}
+
 function PackCard({ pack, onOpen, onDelete }: { pack: PackIndexEntry; onOpen: () => void; onDelete: () => Promise<void> }) {
   const total = pack.filesChanged || 0;
   const reviewed = Math.min(pack.reviewed || 0, total);
-  const pct = total > 0 ? (reviewed / total) * 100 : 0;
-  const complete = total > 0 && reviewed >= total;
+  const focusTotal = pack.focusTotal || 0;
+  const focusDecided = Math.min(pack.focusDecided || 0, focusTotal);
+  const focusAccent = (pack.focusFlagged || 0) + (pack.focusBlocked || 0);
 
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -128,30 +150,23 @@ function PackCard({ pack, onOpen, onDelete }: { pack: PackIndexEntry; onOpen: ()
           {pack.title}
         </div>
 
-        <div className="flex items-center gap-[10px] text-[11px] text-ink-3">
-          {(pack.branch || pack.base) && (
-            <span className="font-mono text-[10.5px] text-ink-2 bg-bg-3 border border-line rounded-[5px] px-[6px] py-[1px] truncate max-w-[60%]">
+        {(pack.branch || pack.base) && (
+          <div className="text-[11px]">
+            <span className="inline-block max-w-full truncate font-mono text-[10.5px] text-ink-2 bg-bg-3 border border-line rounded-[5px] px-[6px] py-[1px]">
               {pack.branch}{pack.base ? ` → ${pack.base}` : ""}
-            </span>
-          )}
-          <span className="font-mono text-ink-4 [font-variant-numeric:tabular-nums]">
-            {total} {total === 1 ? "file" : "files"}
-          </span>
-        </div>
-
-        {total > 0 && (
-          <div className="flex items-center gap-[8px]">
-            <span className="flex-1 h-1 bg-bg-3 rounded-[2px] overflow-hidden">
-              <span
-                className={`block h-full rounded-[2px] ${complete ? "bg-pine" : "bg-ink"}`}
-                style={{ width: `${pct}%` }}
-              />
-            </span>
-            <span className="flex-none font-mono text-[10.5px] [font-variant-numeric:tabular-nums] text-ink-3">
-              {complete ? "✓ done" : `${reviewed}/${total}`}
             </span>
           </div>
         )}
+
+        {(focusTotal > 0 || total > 0) &&
+          (focusTotal > 0 ? (
+            <div className="grid grid-cols-2 gap-[14px]">
+              <CardMetric label="Decisions" value={focusDecided} total={focusTotal} accent={focusAccent} />
+              <CardMetric label="Files" value={reviewed} total={total} />
+            </div>
+          ) : (
+            <CardMetric label="Files" value={reviewed} total={total} />
+          ))}
       </button>
 
       {/* Delete control — top-right, revealed on hover; two-step confirm. */}

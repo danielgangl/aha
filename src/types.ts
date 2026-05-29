@@ -175,6 +175,10 @@ export interface OverviewAssumption {
   id: string;
   text: RichText;
   refs: RichRef[];
+  // Uniform worklist payload — same shape a decision carries: code evidence to
+  // jump to in place, and one concrete thing the reviewer confirms.
+  evidence?: DecisionJump[];
+  check?: string;
 }
 
 export interface OverviewHotspot {
@@ -182,6 +186,8 @@ export interface OverviewHotspot {
   title: RichText;
   why: RichText;
   refs: RichRef[];
+  evidence?: DecisionJump[];
+  check?: string;
 }
 
 export interface Overview {
@@ -295,6 +301,10 @@ export interface PackIndexEntry {
   updatedAt: string;
   filesChanged: number;
   reviewed: number;
+  focusTotal: number;
+  focusDecided: number;
+  focusFlagged: number;
+  focusBlocked: number;
 }
 
 export type TriageStatus = "accept" | "flag" | "block";
@@ -304,11 +314,24 @@ export interface ViewedFileEntry {
   viewedAt: string;
 }
 
+// Snapshot of a Review Focus item's content at the moment it was triaged — the
+// "A" baseline. On re-review we diff this against current ("C") to show "A → C"
+// and ask for re-triage. Captured on triage, refreshed on re-triage, dropped on
+// clear. Plain text so it persists/compares trivially.
+export interface FocusBaseline {
+  lens: Lens;
+  title: string;
+  body: string;
+  check: string;
+  at: string;
+}
+
 export interface ReviewState {
   viewed: string[];
   viewedFiles: Record<string, ViewedFileEntry>;
   changedViewed: string[];
   decisions: Record<string, TriageStatus>;
+  baselines: Record<string, FocusBaseline>;
 }
 
 export interface PersistedReviewState {
@@ -316,6 +339,7 @@ export interface PersistedReviewState {
   viewed: string[];
   viewedFiles: Record<string, ViewedFileEntry>;
   decisions: Record<string, TriageStatus>;
+  baselines: Record<string, FocusBaseline>;
   updatedAt: string;
 }
 

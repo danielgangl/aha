@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 import type {
   DecisionHandler,
+  DecisionJump,
   Decisions,
   FileJumpHandler,
+  FocusBaseline,
   Lens,
   Overview,
   PackFile,
@@ -15,7 +17,7 @@ import type {
 } from "../types";
 import { categoryLabel, hasOverviewContent } from "../lib/pack";
 import { AsciiPanel, RefList, RichText } from "./rich";
-import { CopyContextButton, DecisionCard, LensPill, ResolveZone } from "../decisions.js";
+import { CopyContextButton, DecisionCard, EvidenceRow, LensPill, ResolveZone, SectionBlock } from "../decisions.js";
 import type { FocusItem } from "../lib/review-focus";
 import { buildReviewFocus, focusItemContext } from "../lib/review-focus";
 
@@ -122,6 +124,7 @@ export function HighLevelView({
   files,
   symbols,
   statusMap,
+  baselines,
   setStatus,
   flashId,
   onSymbol,
@@ -133,6 +136,7 @@ export function HighLevelView({
   files: PackFile[];
   symbols?: SymbolMap;
   statusMap: StatusMap;
+  baselines: Record<string, FocusBaseline>;
   setStatus: (id: string, status: TriageStatus | null) => void;
   flashId: string | null;
   onSymbol: SymbolHandler;
@@ -142,12 +146,17 @@ export function HighLevelView({
   const hasOverview = overview && hasOverviewContent(overview);
 
   // Review Focus worklist (merged + sorted + bundled) — pure data lives in lib.
-  const { open: openFocus, resolved: resolvedFocus, nonAccepted: nonAcceptedFocus, nonAcceptedContext } =
-    buildReviewFocus(decisions, overview, statusMap, files);
-  const totalFocus = openFocus.length + resolvedFocus.length;
+  const { open: openFocus, reReview: reReviewFocus, resolved: resolvedFocus, nonAccepted: nonAcceptedFocus, nonAcceptedContext } =
+    buildReviewFocus(decisions, overview, statusMap, files, baselines);
+  const totalFocus = openFocus.length + reReviewFocus.length + resolvedFocus.length;
   const hasFocus = totalFocus > 0;
 
-  const renderOpenFocus = (item: FocusItem) => {
+  // Full worklist card, shared by Open and Re-review. opts.topBanner adds the
+  // provenance strip; opts.onSetStatus lets Re-review re-confirm (a click on the
+  // prior status re-baselines instead of un-triaging).
+  const renderFullFocus = (item: FocusItem, opts?: { topBanner?: ReactNode; onSetStatus?: SetStatusHandler }) => {
+    const onSetStatus = opts?.onSetStatus ?? ((status: TriageStatus | null) => setStatus(item.id, status));
+    const topBanner = opts?.topBanner;
     if (item.decision) {
       return (
         <DecisionCard
@@ -160,9 +169,10 @@ export function HighLevelView({
           onSymbol={onSymbol}
           onJump={onFile}
           status={statusMap[item.id]}
-          onSetStatus={(status) => setStatus(item.id, status)}
+          onSetStatus={onSetStatus}
           flash={flashId === item.id}
           inOverview
+          topBanner={topBanner}
         />
       );
     }
@@ -175,9 +185,14 @@ export function HighLevelView({
           title={<RichText value={item.hotspot.title} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
           why={<RichText value={item.hotspot.why} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
           refs={item.hotspot.refs}
+          evidence={item.hotspot.evidence}
+          check={item.hotspot.check}
+          files={files}
+          symbols={symbols}
           status={statusMap[item.id]}
-          onSetStatus={(status) => setStatus(item.id, status)}
+          onSetStatus={onSetStatus}
           flash={flashId === item.id}
+          topBanner={topBanner}
           onSymbol={onSymbol}
           onFile={onFile}
           onDecision={onDecision}
@@ -192,9 +207,14 @@ export function HighLevelView({
           lens="verify"
           title={<RichText value={item.assumption.text} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
           refs={item.assumption.refs}
+          evidence={item.assumption.evidence}
+          check={item.assumption.check}
+          files={files}
+          symbols={symbols}
           status={statusMap[item.id]}
-          onSetStatus={(status) => setStatus(item.id, status)}
+          onSetStatus={onSetStatus}
           flash={flashId === item.id}
+          topBanner={topBanner}
           onSymbol={onSymbol}
           onFile={onFile}
           onDecision={onDecision}
@@ -203,6 +223,15 @@ export function HighLevelView({
     }
     return null;
   };
+
+  const renderOpenFocus = (item: FocusItem) => renderFullFocus(item);
+
+  const renderReReviewFocus = (item: FocusItem) =>
+    renderFullFocus(item, {
+      topBanner: <ChangedSinceStrip status={statusMap[item.id]} baseline={baselines[item.id]} />,
+      // A click on the same prior status re-confirms (re-baselines) instead of clearing.
+      onSetStatus: (status: TriageStatus | null) => setStatus(item.id, status ?? statusMap[item.id] ?? null),
+    });
 
   const renderResolvedFocus = (item: FocusItem) => {
     const status = statusMap[item.id];
@@ -391,6 +420,22 @@ export function HighLevelView({
               }
             />
             <div className="grid gap-3">
+              {reReviewFocus.length > 0 && (
+                <div className="flex items-center gap-[10px] text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-ink">
+                  <span>⟳ Needs re-review</span>
+                  <span className="font-mono">{reReviewFocus.length}</span>
+                  <span className="flex-1 h-px bg-amber-soft" />
+                </div>
+              )}
+              {reReviewFocus.map((item) => renderReReviewFocus(item))}
+
+              {reReviewFocus.length > 0 && openFocus.length > 0 && (
+                <div className="flex items-center gap-[10px] pt-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-4">
+                  <span>Open</span>
+                  <span className="font-mono">{openFocus.length}</span>
+                  <span className="flex-1 h-px bg-line" />
+                </div>
+              )}
               {openFocus.map((item) => renderOpenFocus(item))}
 
               {resolvedFocus.length > 0 && (
@@ -499,6 +544,30 @@ export function CompactReviewCard({
   );
 }
 
+function statusVerb(status: TriageStatus | undefined): string {
+  return status === "flag" ? "flagged" : status === "block" ? "blocked" : status === "accept" ? "accepted" : "judged";
+}
+
+// Re-review provenance: what you judged ("A") and your prior call, shown above
+// the live card ("C") so you re-decide with context. Rendered as a card topBanner.
+function ChangedSinceStrip({ status, baseline }: { status: TriageStatus | undefined; baseline: FocusBaseline | undefined }) {
+  if (!baseline) return null;
+  return (
+    <div className="mb-3 pb-3 border-b border-dashed border-line-2">
+      <div className="flex items-center gap-[6px] text-[11px] font-semibold text-amber-ink mb-[5px]">
+        <span>⟳</span>
+        <span>changed since you {statusVerb(status)}</span>
+      </div>
+      <div className="text-[11.5px] leading-[1.5] text-ink-3 [text-wrap:pretty]">
+        <span className="text-ink-4">was: </span>
+        <span className="text-ink-2">{baseline.title}</span>
+        {baseline.body && <span className="block mt-[2px]">{baseline.body}</span>}
+        {baseline.check && <span className="block mt-[2px]">Decide: {baseline.check}</span>}
+      </div>
+    </div>
+  );
+}
+
 // .overview-card base shared by both action cards
 // Canonical Review Focus card for the lighter lenses (inspect / verify): same
 // skeleton as a decision — lens tag, headline, prominent "why", refs, and the
@@ -509,9 +578,14 @@ function FocusCard({
   title,
   why,
   refs,
+  evidence,
+  check,
+  files,
+  symbols,
   status,
   onSetStatus,
   flash,
+  topBanner,
   onSymbol,
   onFile,
   onDecision,
@@ -521,18 +595,25 @@ function FocusCard({
   title: ReactNode;
   why?: ReactNode;
   refs?: RichRef[];
+  evidence?: DecisionJump[];
+  check?: string;
+  files: PackFile[];
+  symbols?: SymbolMap;
   status: TriageStatus | undefined;
   onSetStatus: SetStatusHandler;
   flash?: boolean;
+  topBanner?: ReactNode;
   onSymbol: SymbolHandler;
   onFile: FileJumpHandler;
   onDecision: DecisionHandler;
 }) {
+  const evidenceItems = (Array.isArray(evidence) ? evidence : []).filter(Boolean);
   return (
     <article
       id={id}
       className={`relative border border-line rounded-[12px] px-5 pt-[18px] pb-4 scroll-mt-[130px] bg-surface ${statusGradient(status)} ${flash ? "animate-[flashbg_1.6s_ease-out]" : ""}`}
     >
+      {topBanner}
       <header className="flex items-center gap-[6px] flex-wrap mb-[6px]">
         <LensPill lens={lens} />
         {status && <DecisionStatusPill status={status} />}
@@ -546,8 +627,23 @@ function FocusCard({
           {why}
         </div>
       )}
+      {evidenceItems.length > 0 && (
+        <SectionBlock kind="evidence" label="Beleg">
+          {evidenceItems.map((it, j) => (
+            <EvidenceRow
+              key={`${it.ref || "item"}-${it.path || it.fileId || "no-file"}-${it.line || j}`}
+              item={it}
+              kind="evidence"
+              files={files}
+              onJump={onFile}
+              symbols={symbols}
+              onSymbol={onSymbol}
+            />
+          ))}
+        </SectionBlock>
+      )}
       {refs && refs.length > 0 && <RefList refs={refs} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
-      <ResolveZone status={status} onSetStatus={onSetStatus} />
+      <ResolveZone question={check} status={status} onSetStatus={onSetStatus} />
     </article>
   );
 }

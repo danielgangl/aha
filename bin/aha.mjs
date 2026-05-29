@@ -979,16 +979,68 @@ function decisionItemRefValid(item, filePaths) {
   return filePaths.has(filePath);
 }
 
+// Stable, content-anchored id for an overview worklist item. The author id wins;
+// otherwise derive one from the primary evidence file + a short topic slug so the
+// id tracks the *concern*, not its list position. Triage state is keyed by this
+// id, so a positional id would make a reviewer's flag stick to a slot rather than
+// a topic after a regeneration (the re-review desync we are fixing).
+function overviewItemId(item, kind, used) {
+  const author = typeof item.id === "string" && item.id.trim() ? item.id.trim() : "";
+  const base = author || contentAnchoredOverviewId(item, kind);
+  let id = base;
+  let n = 2;
+  while (used.has(id)) {
+    id = `${base}-${n}`;
+    n += 1;
+  }
+  used.add(id);
+  return id;
+}
+
+function contentAnchoredOverviewId(item, kind) {
+  const evidence = Array.isArray(item.evidence) ? item.evidence : [];
+  const anchor = evidence.find((entry) => entry && (entry.path || entry.fileId));
+  const fileStem = anchor ? idSlug(stemOfPath(anchor.path || anchor.fileId)) : "";
+  const topic = topicSlug(item.title != null ? item.title : item.text);
+  const parts = [kind, fileStem, topic].filter(Boolean);
+  return parts.length > 1 ? parts.join("-") : `${kind}-item`;
+}
+
+function rawRichToText(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map((part) => (typeof part === "string" ? part : (part && (part.label || part.id)) || "")).join(" ");
+  }
+  return "";
+}
+
+function topicSlug(value) {
+  return idSlug(rawRichToText(value)).split("-").filter(Boolean).slice(0, 4).join("-");
+}
+
+function idSlug(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function stemOfPath(filePath) {
+  const base = String(filePath).split("/").pop() || "";
+  return base.replace(/\.[^.]+$/, "");
+}
+
 function preserveOverview(overview, refs) {
   if (!overview || typeof overview !== "object") return null;
+  const usedIds = new Set();
   return {
     mentalModelDelta: preserveRichText(overview.mentalModelDelta, refs),
     systemMap: preserveSystemMap(overview.systemMap, refs),
     modelDeltas: (Array.isArray(overview.modelDeltas) ? overview.modelDeltas : [])
       .filter((item) => item && typeof item === "object")
-      .map((item, index) => ({
+      .map((item) => ({
         ...item,
-        id: typeof item.id === "string" && item.id ? item.id : `overview-model-delta-${index + 1}`,
+        id: overviewItemId(item, "model-delta", usedIds),
         title: preserveRichText(item.title, refs),
         before: preserveRichText(item.before, refs),
         after: preserveRichText(item.after, refs),
@@ -1005,17 +1057,17 @@ function preserveOverview(overview, refs) {
       })),
     assumptions: (Array.isArray(overview.assumptions) ? overview.assumptions : [])
       .filter((item) => item && typeof item === "object")
-      .map((item, index) => ({
+      .map((item) => ({
         ...item,
-        id: typeof item.id === "string" && item.id ? item.id : `overview-assumption-${index + 1}`,
+        id: overviewItemId(item, "assumption", usedIds),
         text: preserveRichText(item.text, refs),
         refs: preserveRefs(item.refs, refs),
       })),
     hotspots: (Array.isArray(overview.hotspots) ? overview.hotspots : [])
       .filter((item) => item && typeof item === "object")
-      .map((item, index) => ({
+      .map((item) => ({
         ...item,
-        id: typeof item.id === "string" && item.id ? item.id : `overview-hotspot-${index + 1}`,
+        id: overviewItemId(item, "hotspot", usedIds),
         title: preserveRichText(item.title, refs),
         why: preserveRichText(item.why, refs),
         refs: preserveRefs(item.refs, refs),
@@ -2603,11 +2655,12 @@ function packEntryForFile(file) {
     updatedAt: stat.mtime.toISOString(),
     filesChanged: Array.isArray(pack.files) ? pack.files.length : 0,
     reviewed: reviewedCountForPack(resolved),
+    ...focusProgressForPack(resolved, pack),
   };
 }
 
 // Cheap glance at how far a pack's local review got — drives the dashboard
-// progress bar without the client having to fetch every state sidecar.
+// progress bars without the client having to fetch every state sidecar.
 function reviewedCountForPack(packFile) {
   try {
     const stateFile = stateFileForPack(packFile);
@@ -2619,6 +2672,34 @@ function reviewedCountForPack(packFile) {
   } catch {
     return 0;
   }
+}
+
+// Review Focus burn-down per pack: total = decisions + hotspots + assumptions;
+// decided/flagged/blocked come from the per-pack triage in the state sidecar.
+function focusProgressForPack(packFile, pack) {
+  const focusTotal =
+    (Array.isArray(pack?.decisions?.cards) ? pack.decisions.cards.length : 0) +
+    (Array.isArray(pack?.overview?.hotspots) ? pack.overview.hotspots.length : 0) +
+    (Array.isArray(pack?.overview?.assumptions) ? pack.overview.assumptions.length : 0);
+  let decided = 0;
+  let focusFlagged = 0;
+  let focusBlocked = 0;
+  try {
+    const stateFile = stateFileForPack(packFile);
+    if (fs.existsSync(stateFile)) {
+      const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+      if (state?.decisions && typeof state.decisions === "object") {
+        for (const value of Object.values(state.decisions)) {
+          if (value === "accept" || value === "flag" || value === "block") decided += 1;
+          if (value === "flag") focusFlagged += 1;
+          if (value === "block") focusBlocked += 1;
+        }
+      }
+    }
+  } catch {
+    // ignore unreadable/partial state
+  }
+  return { focusTotal, focusDecided: Math.min(decided, focusTotal), focusFlagged, focusBlocked };
 }
 
 // Target repos the served app may initialize PRs from. Names only ever cross to
@@ -2802,11 +2883,26 @@ function sanitizeReviewState(input) {
       }
     }
   }
+  const baselines = {};
+  if (input?.baselines && typeof input.baselines === "object") {
+    for (const [id, raw] of Object.entries(input.baselines)) {
+      // Keep a content baseline only for an item that is still triaged.
+      if (typeof id !== "string" || !decisions[id] || !raw || typeof raw !== "object") continue;
+      baselines[id] = {
+        lens: ["decide", "inspect", "verify"].includes(raw.lens) ? raw.lens : "decide",
+        title: typeof raw.title === "string" ? raw.title : "",
+        body: typeof raw.body === "string" ? raw.body : "",
+        check: typeof raw.check === "string" ? raw.check : "",
+        at: typeof raw.at === "string" ? raw.at : "",
+      };
+    }
+  }
   return {
     schemaVersion: "0.2",
     viewed,
     viewedFiles,
     decisions,
+    baselines,
     updatedAt: new Date().toISOString(),
   };
 }

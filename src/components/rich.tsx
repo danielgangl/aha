@@ -5,6 +5,31 @@ import type {
   RichRef,
   RichText as RichTextValue,
 } from "../types";
+import { splitInlineCode } from "../lib/inline-code";
+
+// `<code>` / backtick spans inside otherwise-plain prose, rendered as real
+// inline code. Pure-text input → safe by construction (React escapes the rest).
+const INLINE_CODE_CLASS =
+  "font-mono text-[0.92em] px-[3px] py-px rounded-[3px] bg-[var(--bg-3)] text-[var(--ink)]";
+
+export function InlineText({ text }: { text?: string }) {
+  if (!text) return null;
+  const segs = splitInlineCode(text);
+  if (segs.length === 1 && !segs[0].code) return <>{segs[0].text}</>;
+  return (
+    <>
+      {segs.map((seg, index) =>
+        seg.code ? (
+          <code key={index} className={INLINE_CODE_CLASS}>
+            {seg.text}
+          </code>
+        ) : (
+          <React.Fragment key={index}>{seg.text}</React.Fragment>
+        ),
+      )}
+    </>
+  );
+}
 
 export function AsciiPanel({
   label,
@@ -65,7 +90,9 @@ export function RichText({ value, onSymbol, onFile, onDecision }: { value: RichT
   if (Array.isArray(value)) {
     return <RichLine value={value} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />;
   }
-  return <>{value || ""}</>;
+  // Scalar prose (mentalModelDelta, hotspot/assumption text, …) may carry an
+  // inline code marker — render it, don't print the tags literally.
+  return <InlineText text={value || ""} />;
 }
 
 export function RichLine({ value, onSymbol, onFile, onDecision }: { value: RichTextValue | undefined } & RichHandlers) {
