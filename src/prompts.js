@@ -94,6 +94,19 @@ The fragment may contain these fields only:
    - "<p>Viele Änderungen in dieser Datei.</p>"
    - "<ul><li>Funktional: ...</li><li>Bitte prüfen: ...</li></ul>"
 
+1b. file.changedNote
+   Optional delta since the reviewer last viewed this file (shown only when the file is marked CHANGED in the viewer).
+   Write only for files whose diff changed after the reviewer's last viewed fingerprint.
+   Summarize what is NEW in the diff since that prior view — not the full PR delta (file.note covers that).
+   Keep it short: one paragraph or 2–3 bullets max.
+   German, same tone as file.note.
+   Good:
+   - "<p>Neu seit deinem letzten Blick: <code>frontPlacement</code> wird an <code>CapacityTicketFace</code> durchgereicht — Layout-Messphase vs. gestapelte Karte.</p>"
+   - "<ul><li>Forest-Palette: hardcodierte Grüntöne → <code>forest-*</code>-Utilities.</li><li>Kein Verhaltensdelta.</li></ul>"
+   Bad:
+   - Repeating the entire file.note verbatim.
+   - Generic "Datei wurde aktualisiert."
+
 2. file.notes
    Add inline AI notes anchored to existing diff lines:
    {

@@ -41,9 +41,11 @@ import {
 } from "./lib/pack";
 import { plainDiffContent } from "./lib/diff";
 import { CallSitesPanel } from "./components/call-sites";
+import { FileDiffPanel } from "./components/file-panel";
 import { FileCard } from "./components/file-card";
 import { HighLevelLeftRail, HighLevelView } from "./components/high-level";
 import { LeftRail } from "./components/left-rail";
+import { Dashboard } from "./components/dashboard";
 import { EmptyOnboarding, UpdateModal } from "./components/onboarding";
 import { WorkflowModal } from "./components/workflow";
 import "./styles/global.css";
@@ -65,6 +67,7 @@ function App({
   packIndex,
   selectedPackId,
   onSelectPack,
+  onHome,
 }: {
   pr: Pr;
   runtime?: Runtime;
@@ -73,6 +76,7 @@ function App({
   packIndex: PackIndexEntry[];
   selectedPackId: string;
   onSelectPack: (id: string) => void;
+  onHome: () => void;
 }) {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const initialReadingMode = pr.readingOrders[0]?.key || "default";
@@ -102,14 +106,24 @@ function App({
   const [changedViewedFiles, setChangedViewedFiles] = useState<Set<string>>(() => new Set(startingReviewState.changedViewed));
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(() => startingCollapsedFiles);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [panelFileId, setPanelFileId] = useState<string | null>(null);
+  const [panelFileLine, setPanelFileLine] = useState<number | null>(null);
   const [leftRailWidth, setLeftRailWidth] = useState(() => readStoredNumber("aha:left-rail-width", defaultLeftRailWidth()));
   const [rightRailWidth, setRightRailWidth] = useState(() => readStoredNumber("aha:right-rail-width", defaultRightRailWidth()));
   // Mode switch: "high-level" (orientation + review decisions) vs "code" (diff reader).
-  const [mode, setMode] = useState<Mode>("code");
+  // Default to High Level so reviewers orient before reading the diff.
+  const [mode, setMode] = useState<Mode>("high-level");
   // Triage state per decision card. null = open; "accept" | "flag" | "block".
   const [decisionStatus, setDecisionStatus] = useState<StatusMap>(() => startingReviewState.decisions);
   const [readingMode, setReadingMode] = useState(initialReadingMode);
-  const [noiseMode, setNoiseMode] = useState<NoiseMode>("focus");
+  // Two independent rail filters, both default off so the list starts as a
+  // burn-down of what's left: viewed files hidden (re-check to bring them
+  // back, struck through), likely-noise files hidden.
+  const [includeViewed, setIncludeViewed] = useState(false);
+  const [includeNoise, setIncludeNoise] = useState(false);
+  // FileCard still speaks the legacy NoiseMode; "expanded" is now reached only
+  // by the per-block inline reveal, not a global control.
+  const noiseMode: NoiseMode = includeNoise ? "all" : "focus";
   const [workflowOpen, setWorkflowOpen] = useState(false);
   const [updateOpen, setUpdateOpen] = useState(false);
   // Transient flash highlight when jumping from a decision card to a diff line.
@@ -119,13 +133,19 @@ function App({
   const skipNextPersistRef = useRef(false);
 
   const symbol = activeSymId ? pr.symbols[activeSymId] : null;
+  const panelFile = panelFileId ? (pr.files.find((file) => file.id === panelFileId) ?? null) : null;
   const baseCodeView = useMemo(
     () => readingMode === initialReadingMode ? initialCodeView : buildCodeView(pr, readingMode),
     [initialCodeView, initialReadingMode, pr, readingMode]
   );
   const codeView = useMemo(
-    () => applyNoiseModeToCodeView(baseCodeView, pr.reviewSignals, noiseMode),
-    [baseCodeView, noiseMode, pr.reviewSignals]
+    () => applyRailFilters(baseCodeView, {
+      reviewSignals: pr.reviewSignals,
+      includeNoise,
+      includeViewed,
+      reviewedSet: reviewed,
+    }),
+    [baseCodeView, includeNoise, includeViewed, reviewed, pr.reviewSignals]
   );
 
   useEffect(() => {
@@ -162,8 +182,25 @@ function App({
 
   const onSymbol = useCallback((id: string) => {
     setActiveSymId(id);
+    setPanelFileId(null);
     setPanelOpen(true);
   }, []);
+
+  // High Level file references enrich in place: open the file's diff in the
+  // right panel instead of switching to the Code tab — stay in flow, same focus.
+  const onOpenFileInPanel = useCallback((fileId: string, line?: number) => {
+    const targetFileId = pr._fileAliasById?.[fileId] || fileId;
+    setActiveSymId(null);
+    setPanelFileId(targetFileId);
+    setPanelFileLine(line ?? null);
+    setPanelOpen(true);
+    // Ensure the panel is wide enough to actually read code.
+    setRightRailWidth((width) => {
+      const next = clampRailWidth(Math.max(width, 640));
+      localStorage.setItem("aha:right-rail-width", String(next));
+      return next;
+    });
+  }, [pr._fileAliasById]);
 
   const onJumpToFile = useCallback((fileId: string, line?: number) => {
     const targetFileId = pr._fileAliasById?.[fileId] || fileId;
@@ -347,6 +384,9 @@ function App({
   }, [codeView.files, mode]);
 
   const reviewedCount = reviewed.size;
+  const totalFileCount = pr.files.length;
+  const hiddenByFilters = totalFileCount - codeView.files.length;
+  const noiseFileCount = pr.reviewSignals?.summary?.noiseFiles || 0;
   const repositoryName = pr.repositoryName || pr.repository?.name || "aha";
 
   if (pr.files.length === 0) {
@@ -361,10 +401,15 @@ function App({
     <div className={`grid grid-rows-[46px_1fr] h-screen overflow-hidden density-${t.density}`}>
       {/* TOPBAR */}
       <header className="flex items-center gap-[12px] px-[14px] border-b border-line bg-rail z-10 min-w-0">
-        <div className="inline-flex items-center gap-[7px] font-semibold tracking-[-0.012em] text-[13.5px]">
-          <span className="w-[14px] h-[14px] rounded-[4px] bg-ink relative before:content-[''] before:absolute before:inset-[3px] before:border-[1.5px] before:border-rail before:rounded-[1px]" />
+        <button
+          type="button"
+          onClick={onHome}
+          title="Back to dashboard"
+          className="inline-flex items-center gap-[7px] font-semibold tracking-[-0.012em] text-[13.5px] text-ink bg-transparent border-0 cursor-pointer rounded-[6px] px-[2px] -mx-[2px] hover:text-ink focus-visible:outline-2 focus-visible:outline-blue focus-visible:outline-offset-2"
+        >
+          <span aria-hidden="true" className="w-[14px] h-[14px] rounded-[4px] bg-ink relative before:content-[''] before:absolute before:inset-[3px] before:border-[1.5px] before:border-rail before:rounded-[1px]" />
           <span>aha</span>
-        </div>
+        </button>
         {packIndex.length > 0 && (
           <select
             className="h-[26px] max-w-[300px] rounded-[6px] border border-line bg-bg-3 px-[8px] font-mono text-[11px] text-ink-2 outline-none hover:border-line-2 focus:border-blue focus:text-ink"
@@ -476,8 +521,14 @@ function App({
             readingMode={readingMode}
             onReadingModeChange={setReadingMode}
             reviewSignals={pr.reviewSignals}
-            noiseMode={noiseMode}
-            onNoiseModeChange={setNoiseMode}
+            includeViewed={includeViewed}
+            onIncludeViewedChange={setIncludeViewed}
+            includeNoise={includeNoise}
+            onIncludeNoiseChange={setIncludeNoise}
+            noiseFileCount={noiseFileCount}
+            totalFileCount={totalFileCount}
+            reviewedCount={reviewedCount}
+            hiddenByFilters={hiddenByFilters}
           />
         ) : mode === "high-level" ? (
           <HighLevelLeftRail
@@ -512,11 +563,12 @@ function App({
               overview={pr.overview}
               decisions={pr.decisions}
               files={pr.files}
+              symbols={pr.symbols}
               statusMap={decisionStatus}
               setStatus={setStatus}
               flashId={decisionFlashId}
               onSymbol={onSymbol}
-              onFile={onJumpToFile}
+              onFile={onOpenFileInPanel}
               onDecision={onJumpToDecision}
             />
           ) : (
@@ -545,6 +597,7 @@ function App({
                     onSymbol={onSymbol}
                     activeSym={activeSymId}
                     reviewed={reviewed.has(fileReviewKey(f))}
+                    changedSinceViewed={changedViewedFiles.has(fileReviewKey(f))}
                     onToggleReviewed={onToggleReviewed}
                     collapsed={collapsedFiles.has(fileReviewKey(f))}
                     onToggleCollapsed={onToggleCollapsed}
@@ -566,14 +619,25 @@ function App({
 
         <aside className={`border-l border-line bg-rail overflow-y-auto flex flex-col ${panelOpen ? "" : "w-[36px]"}`}>
           {panelOpen ? (
-            <CallSitesPanel
-              symbol={symbol}
-              onClose={() => setPanelOpen(false)}
-              onJumpToFile={onJumpToFile}
-            />
+            panelFileId ? (
+              <FileDiffPanel
+                file={panelFile}
+                line={panelFileLine}
+                symbols={pr.symbols}
+                onSymbol={onSymbol}
+                onClose={() => setPanelOpen(false)}
+                onOpenInCode={() => onJumpToFile(panelFileId, panelFileLine ?? undefined)}
+              />
+            ) : (
+              <CallSitesPanel
+                symbol={symbol}
+                onClose={() => setPanelOpen(false)}
+                onJumpToFile={onJumpToFile}
+              />
+            )
           ) : (
-            <button className="w-[36px] border-0 bg-transparent cursor-pointer h-full text-ink-3 font-mono text-[11px] [writing-mode:vertical-rl] [text-orientation:mixed] py-[14px] flex items-center justify-center hover:bg-bg-3 hover:text-ink" onClick={() => setPanelOpen(true)} title="Open call sites panel">
-              Call sites →
+            <button className="w-[36px] border-0 bg-transparent cursor-pointer h-full text-ink-3 font-mono text-[11px] [writing-mode:vertical-rl] [text-orientation:mixed] py-[14px] flex items-center justify-center hover:bg-bg-3 hover:text-ink" onClick={() => setPanelOpen(true)} title="Open context panel">
+              Context →
             </button>
           )}
         </aside>
@@ -602,60 +666,67 @@ interface ReviewStateResult {
 
 type LoaderState =
   | { status: "loading" }
-  | { status: "ready"; pr: Pr; runtime: Runtime; reviewState: ReviewState | null; reviewStateAvailable: boolean; packIndex: PackIndexEntry[]; selectedPackId: string }
+  | { status: "dashboard"; runtime: Runtime; packIndex: PackIndexEntry[] }
+  | { status: "viewer"; pr: Pr; runtime: Runtime; reviewState: ReviewState | null; reviewStateAvailable: boolean; packIndex: PackIndexEntry[]; selectedPackId: string }
   | { status: "error"; error: Error };
 
 function AhaLoader() {
   const [state, setState] = useState<LoaderState>({ status: "loading" });
   const [selectedPackId, setSelectedPackId] = useState(() => selectedPackFromLocation());
 
+  // Single navigation primitive: pack id → viewer, "" → dashboard. Keeps URL
+  // (`?pack=…`) and state in lockstep so deep links and back/forward work.
+  const navigate = useCallback((packId: string) => {
+    setPackLocation(packId);
+    setSelectedPackId(packId);
+  }, []);
+
   useEffect(() => {
     let alive = true;
     setState({ status: "loading" });
 
-    async function load() {
+    async function load(): Promise<LoaderState> {
       const runtimeRequest = fetch("/aha-runtime.json", { cache: "no-store" })
         .then((res) => (res.ok ? res.json() : DEFAULT_RUNTIME))
         .catch(() => DEFAULT_RUNTIME);
       const indexResponse = await fetch(packUrl("/aha-packs.json", selectedPackId), { cache: "no-store" });
-      const indexPayload = indexResponse.ok ? await indexResponse.json() : { packs: [], selectedId: selectedPackId };
+      const indexPayload = indexResponse.ok ? await indexResponse.json() : { packs: [] };
       const packIndex = normalizePackIndex(indexPayload?.packs);
+      const runtime = normalizeRuntime(await runtimeRequest);
+
+      // No valid explicit pack selected → dashboard (which itself falls back to
+      // onboarding when the library is empty). Strip any stale ?pack.
       const requestedPackIsAvailable = selectedPackId && packIndex.some((pack) => pack.id === selectedPackId);
-      const actualSelectedPackId = requestedPackIsAvailable
-        ? selectedPackId
-        : (typeof indexPayload?.selectedId === "string" ? indexPayload.selectedId : "") || packIndex[0]?.id || "";
-      if (actualSelectedPackId && actualSelectedPackId !== selectedPackFromLocation()) {
-        setPackLocation(actualSelectedPackId);
+      if (!requestedPackIsAvailable) {
+        if (selectedPackFromLocation()) setPackLocation("");
+        return { status: "dashboard", runtime, packIndex };
       }
-      const packRequest = fetch(packUrl("/aha.json", actualSelectedPackId), { cache: "no-store" })
+
+      const packRequest = fetch(packUrl("/aha.json", selectedPackId), { cache: "no-store" })
         .then((res) => {
           if (!res.ok) throw new Error(`Failed to load aha.json (${res.status})`);
           return res.json();
         });
-      const stateRequest: Promise<ReviewStateResult> = fetch(packUrl("/aha-state.json", actualSelectedPackId), { cache: "no-store" })
+      const stateRequest: Promise<ReviewStateResult> = fetch(packUrl("/aha-state.json", selectedPackId), { cache: "no-store" })
         .then((res) => (res.ok
           ? res.json().then((data: unknown) => ({ available: true, data }))
           : { available: false, data: null }))
         .catch(() => ({ available: false, data: null }));
-      const [pack, reviewStateResult, runtime] = await Promise.all([packRequest, stateRequest, runtimeRequest]);
-      return { pack, reviewStateResult, runtime, packIndex, actualSelectedPackId };
+      const [pack, reviewStateResult] = await Promise.all([packRequest, stateRequest]);
+      const pr = normalizeAhaPack(pack);
+      return {
+        status: "viewer",
+        pr,
+        runtime,
+        reviewState: reviewStateResult.available ? normalizeReviewState(reviewStateResult.data, pr) : null,
+        reviewStateAvailable: reviewStateResult.available,
+        packIndex,
+        selectedPackId,
+      };
     }
 
     load()
-      .then(({ pack, reviewStateResult, runtime, packIndex, actualSelectedPackId }) => {
-        const pr = normalizeAhaPack(pack);
-        if (alive) {
-          setState({
-            status: "ready",
-            pr,
-            runtime: normalizeRuntime(runtime),
-            reviewState: reviewStateResult.available ? normalizeReviewState(reviewStateResult.data, pr) : null,
-            reviewStateAvailable: reviewStateResult.available,
-            packIndex,
-            selectedPackId: actualSelectedPackId,
-          });
-        }
-      })
+      .then((next) => { if (alive) setState(next); })
       .catch((error: unknown) => {
         if (alive) {
           setState({
@@ -682,6 +753,10 @@ function AhaLoader() {
     );
   }
 
+  if (state.status === "dashboard") {
+    return <Dashboard packIndex={state.packIndex} runtime={state.runtime} onOpenPack={navigate} />;
+  }
+
   return (
     <App
       key={state.selectedPackId || `${state.pr.repositoryName}:${state.pr.number}`}
@@ -691,7 +766,8 @@ function AhaLoader() {
       initialReviewStateAvailable={state.reviewStateAvailable}
       packIndex={state.packIndex}
       selectedPackId={state.selectedPackId}
-      onSelectPack={setSelectedPackId}
+      onSelectPack={navigate}
+      onHome={() => navigate("")}
     />
   );
 }
@@ -702,7 +778,8 @@ function selectedPackFromLocation(): string {
 
 function setPackLocation(packId: string): void {
   const url = new URL(window.location.href);
-  url.searchParams.set("pack", packId);
+  if (packId) url.searchParams.set("pack", packId);
+  else url.searchParams.delete("pack");
   window.history.replaceState(null, "", url);
 }
 
@@ -726,6 +803,7 @@ function normalizePackIndex(value: unknown): PackIndexEntry[] {
       kind: typeof entry.kind === "string" ? entry.kind : "",
       updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
       filesChanged: Number.isFinite(Number(entry.filesChanged)) ? Number(entry.filesChanged) : 0,
+      reviewed: Number.isFinite(Number(entry.reviewed)) ? Number(entry.reviewed) : 0,
     }))
     .filter((entry) => entry.id);
 }
@@ -1280,9 +1358,24 @@ function buildFilesystemCodeView(files: PackFile[]): CodeView {
   return { files: sortedFiles, groups };
 }
 
-function applyNoiseModeToCodeView(codeView: CodeView, reviewSignals: ReviewSignals | undefined, noiseMode: NoiseMode): CodeView {
-  if (noiseMode !== "focus") return codeView;
-  const isVisible = (file: PackFile) => !isNoiseSignal(reviewSignals?.files?.[fileSignalKey(file)]);
+interface RailFilterOptions {
+  reviewSignals: ReviewSignals | undefined;
+  includeNoise: boolean;
+  includeViewed: boolean;
+  reviewedSet: Set<string>;
+}
+
+// Shrink the code view to "what still needs attention": optionally drop
+// likely-noise files and/or files already marked viewed. Drives both the rail
+// and the center document so the two stay in lockstep.
+function applyRailFilters(codeView: CodeView, opts: RailFilterOptions): CodeView {
+  const { reviewSignals, includeNoise, includeViewed, reviewedSet } = opts;
+  if (includeNoise && includeViewed) return codeView;
+  const isVisible = (file: PackFile) => {
+    if (!includeNoise && isNoiseSignal(reviewSignals?.files?.[fileSignalKey(file)])) return false;
+    if (!includeViewed && reviewedSet.has(fileReviewKey(file))) return false;
+    return true;
+  };
   const groups = codeView.groups
     .map((group) => ({
       ...group,
@@ -1354,8 +1447,10 @@ function defaultRightRailWidth(): number {
 }
 
 function clampRailWidth(value: number): number {
-  if (typeof window === "undefined") return Math.max(220, Math.min(460, value));
-  const max = Math.min(520, Math.max(260, Math.floor(window.innerWidth * 0.5)));
+  if (typeof window === "undefined") return Math.max(220, Math.min(900, value));
+  // Allow a much wider rail than before — the file-diff panel needs room to be
+  // readable (code wraps badly when narrow).
+  const max = Math.min(1000, Math.max(360, Math.floor(window.innerWidth * 0.7)));
   const min = window.innerWidth <= 980 ? 200 : 220;
   return Math.max(min, Math.min(max, Math.round(value)));
 }
@@ -1500,4 +1595,14 @@ function useTweaks(defaults: Tweaks): [Tweaks, (key: keyof Tweaks, value: TweakV
   return [values, setTweak];
 }
 
+// Apply the stored theme (default dark) to <body> before React mounts so the
+// dashboard, onboarding, and loading screens — which render outside <App> — are
+// themed too, not just the viewer. App keeps it in sync on toggle.
+function applyStoredTheme(): void {
+  const stored = readStoredObject("aha:tweaks");
+  const theme = typeof stored.theme === "string" ? stored.theme : TWEAK_DEFAULTS.theme;
+  document.body.classList.toggle("theme-dark", theme === "dark");
+}
+
+applyStoredTheme();
 createRoot(document.getElementById("root")!).render(<AhaLoader />);

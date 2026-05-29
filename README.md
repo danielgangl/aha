@@ -4,6 +4,8 @@ Prototype. Vibecoded to see if the reviewpack concept actually makes sense.
 
 This is a read-only local PR review viewer. It generates an `aha.json` from a GitHub PR diff, serves it locally, and lets optional AI passes add review context as fragment files that get merged back into the pack.
 
+**Target audience:** senior engineers who need to plough through AI-generated PRs as fast as possible — with as little mental strain as possible and the best review outcome possible. Every UX decision optimizes for that: shrink the file list to what still needs attention, keep noise and already-viewed files out of the way, and never make the reviewer reverse-engineer a control.
+
 It is intentionally not a polished product yet:
 
 - no GitHub write actions
@@ -72,6 +74,23 @@ aha prompt --mode init --pr 123 --repo /path/to/repo
 ```
 
 `aha serve` launches one local viewer for the central `packs/<repo>/<pr>/` library. Use the picker in the top-left header to switch between packs instead of running several ports. `aha serve --pack ./aha.json` still opens one explicit pack. `aha start` launches the empty onboarding screen with copyable commands and prompts.
+
+### Dashboard
+
+When the library has at least one pack, the bare URL (`/`) shows a **dashboard** — a list of reviews in flight with per-pack progress, newest first. Click a pack to open the viewer; the `aha` logo (top-left) takes you back. `aha serve --pack X` and `aha review` deep-link straight into the viewer (`/?pack=<id>`), so only the plain library `serve` lands on the dashboard. With zero packs, the dashboard falls back to onboarding.
+
+The dashboard's **New from PR** action initializes the deterministic pack for a PR (`gh pr diff`, no AI yet) against a repo you've registered locally. Registration is an allowlist — the browser only ever sees repo names, never filesystem paths — in a gitignored `.aha.local.json` at the repo root:
+
+```json
+{
+  "cli": "/optional/absolute/path/to/bin/aha.mjs",
+  "repos": [
+    { "name": "my-repo", "path": "/absolute/path/to/my-repo" }
+  ]
+}
+```
+
+AI enrichment and the one-click Update pass are intentionally not wired yet — for now they remain the copy-a-prompt-to-your-agent flow.
 
 `generate --pr` must be run inside the target git repository. It uses read-only GitHub CLI commands:
 

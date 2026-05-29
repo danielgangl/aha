@@ -1,16 +1,18 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   DecisionCardData,
   DecisionCategory,
   DecisionJump,
   DecisionQuestion,
   DecisionSection,
-  DiffContent,
-  DiffLine,
+  Lens,
   PackFile,
   Pr,
+  SymbolHandler,
+  SymbolMap,
   TriageStatus,
 } from "./types";
+import { DiffExcerpt } from "./components/diff";
 
 // v2/decisions.jsx — Decisions Mode.
 // Decision Cards stacked vertically. Each card states a decision/claim,
@@ -130,16 +132,22 @@ function EvidenceRow({
   onJump,
   kind,
   files,
+  symbols,
+  onSymbol,
 }: {
   item: DecisionJump;
   onJump: JumpHandler;
   kind?: string;
   files: PackFile[];
+  symbols?: SymbolMap;
+  onSymbol?: SymbolHandler;
 }) {
   const filePath = item?.path || item?.fileId;
   const isLink = !!filePath;
-  const evidence = findEvidenceLines(item, files);
-  const [expanded, setExpanded] = useState(false);
+  const file = filePath ? files.find((f) => f.path === filePath || f.id === filePath) : undefined;
+  const canExpand = !!file && item.line != null;
+  // The evidence is the proof we want shown — open by default, collapsible.
+  const [expanded, setExpanded] = useState(true);
 
   // .ev-row .ev-mark tone by kind
   const markTone =
@@ -153,16 +161,10 @@ function EvidenceRow({
 
   return (
     <div className="flex flex-col gap-[3px]">
-      <div
-        className={`grid grid-cols-[16px_auto_1fr_auto] gap-2 items-center px-2 py-[5px] rounded-[5px] text-xs group ${
-          isLink ? "cursor-pointer hover:bg-bg-3" : ""
-        }`}
-        onClick={() => isLink && filePath && onJump(filePath, item.line)}
-        title={isLink ? `Jump to ${item.ref}` : ""}
-      >
-        {evidence.length > 0 ? (
+      <div className="grid grid-cols-[16px_minmax(0,1fr)_auto] gap-2 items-start px-2 py-[5px] rounded-[5px] group">
+        {canExpand ? (
           <button
-            className={`w-4 h-4 p-0 inline-flex items-center justify-center border border-line rounded-[4px] bg-surface text-ink-3 cursor-pointer font-mono text-[13px] leading-none transition-[transform,color,border-color] duration-[120ms] ease-out hover:border-ink-3 hover:text-ink ${
+            className={`mt-px w-4 h-4 p-0 inline-flex items-center justify-center border border-line rounded-[4px] bg-surface text-ink-3 cursor-pointer font-mono text-[13px] leading-none transition-[transform,color,border-color] duration-[120ms] ease-out hover:border-ink-3 hover:text-ink ${
               expanded ? "rotate-90 text-ink!" : ""
             }`}
             data-open={expanded}
@@ -170,51 +172,42 @@ function EvidenceRow({
               event.stopPropagation();
               setExpanded((value) => !value);
             }}
-            title={expanded ? "Hide evidence" : "Show evidence inline"}
+            title={expanded ? "Hide code" : "Show code inline"}
           >
             ›
           </button>
         ) : (
-          <span className={`font-mono text-center text-[11px] ${markTone}`}>{kindMark(kind)}</span>
+          <span className={`mt-px font-mono text-center text-[11px] ${markTone}`}>{kindMark(kind)}</span>
         )}
-        <span
-          className={`font-mono text-[11.5px] font-medium whitespace-nowrap ${
-            isLink ? "text-blue-ink" : "text-ink"
-          }`}
-        >
-          {item?.ref}
-        </span>
-        <span className="text-xs text-ink-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
-          {item?.desc}
-        </span>
+        <div className="min-w-0 flex flex-col gap-[2px]">
+          {/* Only the path toggles the code — the description below is plain text. */}
+          <span
+            onClick={() => (canExpand ? setExpanded((value) => !value) : isLink && filePath && onJump(filePath, item.line))}
+            title={canExpand ? (expanded ? "Hide code" : "Show code inline") : isLink ? `Jump to ${item.ref}` : ""}
+            className={`font-mono text-[11.5px] font-medium overflow-hidden text-ellipsis whitespace-nowrap ${
+              canExpand || isLink ? "cursor-pointer hover:underline" : ""
+            } ${isLink ? "text-blue-ink" : "text-ink"}`}
+          >
+            {item?.ref}
+          </span>
+          {item?.desc && (
+            <span className="text-[12px] leading-[1.45] text-ink-2 [text-wrap:pretty]">{item.desc}</span>
+          )}
+        </div>
         {isLink && (
-          <span className="text-ink-4 font-mono text-[11px] group-hover:text-blue-ink">↗</span>
+          <button
+            type="button"
+            className="mt-px text-ink-4 font-mono text-[11px] cursor-pointer hover:text-blue-ink"
+            title="Open in Code tab"
+            onClick={(event) => { event.stopPropagation(); if (filePath) onJump(filePath, item.line); }}
+          >
+            ↗
+          </button>
         )}
       </div>
-      {expanded && evidence.length > 0 && (
-        <div className="mx-2 mb-1 ml-6 border border-line rounded-[6px] overflow-hidden bg-paper">
-          {evidence.map((line, index) => (
-            <div
-              className={`grid grid-cols-[42px_18px_1fr] gap-0 min-w-0 font-mono text-[11.5px] leading-[1.55] ${
-                line.k === "add" ? "bg-add-bg" : line.k === "del" ? "bg-del-bg" : ""
-              }`}
-              key={`${line.k}-${line.L || ""}-${line.R || ""}-${index}`}
-            >
-              <span className="px-[7px] py-[2px] text-ink-4 text-right border-r border-line">
-                {line.R ?? line.L ?? ""}
-              </span>
-              <span
-                className={`py-[2px] text-center ${
-                  line.k === "add" ? "text-add-mark" : line.k === "del" ? "text-del-mark" : "text-ink-3"
-                }`}
-              >
-                {sigFor(line.k)}
-              </span>
-              <span className="py-[2px] pr-2 pl-0 text-ink overflow-hidden text-ellipsis whitespace-pre">
-                {renderCodeText(line.c)}
-              </span>
-            </div>
-          ))}
+      {expanded && file && (
+        <div className="mx-2 mb-1 ml-6">
+          <DiffExcerpt file={file} anchorLine={item.line} symbols={symbols} onSymbol={onSymbol} />
         </div>
       )}
     </div>
@@ -223,6 +216,77 @@ function EvidenceRow({
 function kindMark(k?: string) {
   const marks: Record<string, string> = { evidence: "→", gap: "✗", asymmetry: "⚖", alternative: "·", check: "?" };
   return (k && marks[k]) || "·";
+}
+
+// Copy a prebuilt context string (see lib/decision-context) to the clipboard.
+export function CopyContextButton({ text, label = "copy" }: { text: string; label?: string }) {
+  const resetRef = useRef<number | null>(null);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => () => { if (resetRef.current) window.clearTimeout(resetRef.current); }, []);
+  return (
+    <button
+      type="button"
+      title="Copy full context for an agent"
+      aria-label="Copy full context for an agent"
+      onClick={(event) => {
+        event.stopPropagation();
+        navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          if (resetRef.current) window.clearTimeout(resetRef.current);
+          resetRef.current = window.setTimeout(() => setCopied(false), 1200);
+        }).catch(() => {});
+      }}
+      className="h-[24px] px-[8px] inline-flex items-center gap-[5px] border border-line-2 rounded-[6px] bg-surface text-ink-3 font-mono text-[10.5px] normal-case tracking-normal cursor-pointer hover:bg-bg-3 hover:text-ink"
+    >
+      {copied ? "✓ copied" : `⧉ ${label}`}
+    </button>
+  );
+}
+
+// Lens tag — the action type a Review Focus item asks for.
+export function LensPill({ lens }: { lens: Lens }) {
+  const tone =
+    lens === "decide" ? "bg-blue-soft text-blue-ink"
+    : lens === "inspect" ? "bg-amber-soft text-amber-ink"
+    : "bg-bg-3 text-ink-2";
+  return (
+    <span className={`inline-flex items-center h-5 px-2 rounded-[4px] font-mono text-[10px] font-semibold tracking-[0.03em] uppercase ${tone}`}>
+      {lens}
+    </span>
+  );
+}
+
+// Resolve zone — the question you answer sits with the buttons you answer it
+// with. Shared by full decisions and the lighter inspect/verify cards.
+export function ResolveZone({
+  question,
+  status,
+  onSetStatus,
+  copyContext,
+}: {
+  question?: string;
+  status: Status;
+  onSetStatus: (status: TriageStatus | null) => void;
+  copyContext?: string;
+}) {
+  return (
+    <footer className="mt-4 pt-3 border-t border-line grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+      <div className="min-w-0">
+        {question ? (
+          <>
+            <span className="block text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3 mb-[2px]">Decide</span>
+            <span className="text-[13px] leading-[1.45] text-ink font-medium [text-wrap:pretty]">{question}</span>
+          </>
+        ) : (
+          <span className="text-[12px] text-ink-3">Your call</span>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        {copyContext && <CopyContextButton text={copyContext} />}
+        <TriageButtons status={status} onSetStatus={onSetStatus} />
+      </div>
+    </footer>
+  );
 }
 
 function DecisionCard({
@@ -234,6 +298,9 @@ function DecisionCard({
   files,
   flash,
   inOverview,
+  symbols,
+  onSymbol,
+  lens,
 }: {
   card: DecisionCardData;
   categories: DecisionCategory[];
@@ -245,8 +312,13 @@ function DecisionCard({
   // When rendered inside the High-Level overview, .overview-doc .dc[data-risk]
   // overrides the 3px risk accent with a flat 1px line.
   inOverview?: boolean;
+  symbols?: SymbolMap;
+  onSymbol?: SymbolHandler;
+  lens?: Lens;
 }) {
   const sections = Array.isArray(card.sections) ? card.sections : [];
+  const checkSection = sections.find((sec) => sec.kind === "check");
+  const evidenceSections = sections.filter((sec) => sec.kind !== "check");
 
   // .dc base
   // .dc[data-risk] left border (overridden to 1px line inside .overview-doc).
@@ -281,11 +353,11 @@ function DecisionCard({
     >
       <CardHead>
         <div className="flex gap-[6px] flex-wrap items-center">
+          {lens && <LensPill lens={lens} />}
           <CategoryPill category={card.category} categories={categories} />
           <RiskPill risk={card.risk} />
           {status && <StatusPill status={status} />}
         </div>
-        <TriageButtons status={status} onSetStatus={onSetStatus} />
       </CardHead>
 
       <h3 className="font-sans font-semibold text-base leading-[1.3] tracking-[-0.008em] text-ink mt-[6px] mb-2">
@@ -301,34 +373,23 @@ function DecisionCard({
         </p>
       )}
 
-      {sections.map((sec: DecisionSection, i) => {
-        if (sec.kind === "check") {
-          return (
-            <div
-              className="mt-3 px-3 py-[10px] bg-bg-2 border border-line rounded-[7px] flex flex-col gap-[3px]"
-              key={`${sec.kind || "section"}-${sec.label || i}`}
-            >
-              <span className="text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3">Check</span>
-              <span className="text-[13px] leading-[1.5] text-ink font-sans font-medium [text-wrap:pretty]">
-                {sec.text}
-              </span>
-            </div>
-          );
-        }
-        return (
-          <SectionBlock kind={sec.kind} label={sec.label} key={`${sec.kind || "section"}-${sec.label || i}`}>
-            {(Array.isArray(sec.items) ? sec.items : []).filter(Boolean).map((it, j) => (
-              <EvidenceRow
-                key={`${it.ref || "item"}-${it.path || it.fileId || "no-file"}-${it.line || j}`}
-                item={it}
-                kind={sec.kind}
-                files={files}
-                onJump={onJump}
-              />
-            ))}
-          </SectionBlock>
-        );
-      })}
+      {evidenceSections.map((sec: DecisionSection, i) => (
+        <SectionBlock kind={sec.kind} label={sec.label} key={`${sec.kind || "section"}-${sec.label || i}`}>
+          {(Array.isArray(sec.items) ? sec.items : []).filter(Boolean).map((it, j) => (
+            <EvidenceRow
+              key={`${it.ref || "item"}-${it.path || it.fileId || "no-file"}-${it.line || j}`}
+              item={it}
+              kind={sec.kind}
+              files={files}
+              onJump={onJump}
+              symbols={symbols}
+              onSymbol={onSymbol}
+            />
+          ))}
+        </SectionBlock>
+      ))}
+
+      <ResolveZone question={checkSection?.text} status={status} onSetStatus={onSetStatus} />
     </article>
   );
 }
@@ -391,26 +452,6 @@ function QuestionsList({ questions, onJump }: { questions: DecisionQuestion[]; o
       ))}
     </ol>
   );
-}
-
-function findEvidenceLines(item: DecisionJump, files: PackFile[]): DiffLine[] {
-  const filePath = item?.path || item?.fileId;
-  if (!filePath || item.line == null) return [];
-  const file = files.find((file) => file.path === filePath || file.id === filePath);
-  if (!file) return [];
-  return file.diff.filter((line) => line.R === item.line || line.L === item.line);
-}
-
-function renderCodeText(content: DiffContent): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.map((part) => (typeof part === "string" ? part : part?.label || "")).join("");
-}
-
-function sigFor(kind: string): string {
-  if (kind === "add") return "+";
-  if (kind === "del") return "−";
-  return " ";
 }
 
 // ── Left rail in Decisions mode ─────────────────────────────────

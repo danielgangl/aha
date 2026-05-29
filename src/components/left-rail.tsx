@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useState } from "react";
 import type {
   CodeViewGroup,
   FileJumpHandler,
-  NoiseMode,
   PackFile,
   ReadingOrder,
   ReviewSignals,
@@ -13,7 +12,6 @@ import {
   fileMatchesSearch,
   fileReviewKey,
   fileSignalKey,
-  hasReviewSignals,
   isNoiseSignal,
   normalizeFileSearch,
 } from "../lib/pack";
@@ -265,6 +263,49 @@ function SwitchButton({
   );
 }
 
+// ── Reusable: filter checkbox (Viewed / Noise) ─────────────────
+// Mirrors the file-head "Viewed" pill: a 14px box that fills + shows a ✓
+// when on. Optional trailing count; disabled state dims the whole pill.
+function FilterCheckbox({
+  label,
+  on,
+  disabled,
+  count,
+  onClick,
+  title,
+}: {
+  label: string;
+  on: boolean;
+  disabled?: boolean;
+  count?: number;
+  onClick: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      data-on={on}
+      onClick={onClick}
+      title={title}
+      className={[
+        "group/cb inline-flex h-[22px] items-center gap-[6px] text-[11px] text-ink-2 cursor-pointer select-none transition-colors",
+        "hover:text-ink",
+        "data-[on=true]:text-ink",
+        "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:text-ink-2",
+      ].join(" ")}
+    >
+      <span className="inline-flex h-[14px] w-[14px] items-center justify-center rounded-[3px] border-[1.5px] border-ink-4 bg-surface font-sans text-[11px] font-bold leading-none group-data-[on=true]/cb:border-ink group-data-[on=true]/cb:bg-ink group-data-[on=true]/cb:text-bg group-data-[on=true]/cb:after:content-['✓']" />
+      <span>{label}</span>
+      {count != null && (
+        <span className="font-mono text-[10px] text-ink-4 [font-variant-numeric:tabular-nums] group-data-[on=true]/cb:text-ink-3">
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
 // ── Left rail: file list grouped by reading-order phase ────────
 export function LeftRail({
   files,
@@ -277,8 +318,14 @@ export function LeftRail({
   readingMode,
   onReadingModeChange,
   reviewSignals,
-  noiseMode,
-  onNoiseModeChange,
+  includeViewed,
+  onIncludeViewedChange,
+  includeNoise,
+  onIncludeNoiseChange,
+  noiseFileCount,
+  totalFileCount,
+  reviewedCount,
+  hiddenByFilters,
 }: {
   files: PackFile[];
   groups: CodeViewGroup[];
@@ -290,15 +337,19 @@ export function LeftRail({
   readingMode: string;
   onReadingModeChange: (mode: string) => void;
   reviewSignals: ReviewSignals | undefined;
-  noiseMode: NoiseMode;
-  onNoiseModeChange: (mode: NoiseMode) => void;
+  includeViewed: boolean;
+  onIncludeViewedChange: (next: boolean) => void;
+  includeNoise: boolean;
+  onIncludeNoiseChange: (next: boolean) => void;
+  noiseFileCount: number;
+  totalFileCount: number;
+  reviewedCount: number;
+  hiddenByFilters: number;
 }) {
   const [fileQuery, setFileQuery] = useState("");
-  const reviewedCount = files.filter((file) => reviewedSet.has(fileReviewKey(file))).length;
-  const reviewedPct = files.length > 0 ? (reviewedCount / files.length) * 100 : 0;
+  const reviewedPct = totalFileCount > 0 ? (reviewedCount / totalFileCount) * 100 : 0;
   const hasAiOrder = readingOrders.length > 0;
   const activeOrder = readingOrders.find((order) => order.key === readingMode);
-  const noiseSummary = reviewSignals?.summary;
   const normalizedQuery = normalizeFileSearch(fileQuery);
   const visibleGroups = useMemo(() => {
     if (!normalizedQuery) return groups;
@@ -335,7 +386,11 @@ export function LeftRail({
           Files in this PR
         </span>
         <span className="font-mono text-[10.5px] text-ink-3">
-          {normalizedQuery ? `${visibleFileCount}/${files.length}` : files.length}
+          {normalizedQuery
+            ? `${visibleFileCount}/${files.length}`
+            : files.length === totalFileCount
+              ? totalFileCount
+              : `${files.length} of ${totalFileCount}`}
         </span>
       </div>
       <div className="px-2.5 py-2 border-b border-line">
@@ -356,10 +411,12 @@ export function LeftRail({
           }}
         />
       </div>
-      <div className="grid grid-cols-2 gap-1 px-2.5 pt-2 pb-2 border-b border-line">
+      {/* ── Arrange: how the surviving files are ordered ── */}
+      <div className="grid grid-cols-2 gap-1 px-2.5 pt-2 pb-1.5">
         <SwitchButton
           active={readingMode === "default"}
           onClick={() => onReadingModeChange("default")}
+          title="Order files by folder path"
         >
           Filesystem
         </SwitchButton>
@@ -372,24 +429,31 @@ export function LeftRail({
           Grouped
         </SwitchButton>
       </div>
-      <div className="grid grid-cols-3 gap-1 px-2.5 pt-2 pb-1">
-        <SwitchButton small active={noiseMode === "focus"} onClick={() => onNoiseModeChange("focus")}>
-          Review focus
-        </SwitchButton>
-        <SwitchButton small active={noiseMode === "all"} onClick={() => onNoiseModeChange("all")}>
-          All files
-        </SwitchButton>
-        <SwitchButton small active={noiseMode === "expanded"} onClick={() => onNoiseModeChange("expanded")}>
-          Show noise
-        </SwitchButton>
-      </div>
-      <div
-        data-active={hasReviewSignals(reviewSignals)}
-        className="px-3 pb-2 border-b border-line text-amber-ink text-[10.5px] leading-[1.35] data-[active=false]:text-ink-4"
-      >
-        {hasReviewSignals(reviewSignals)
-          ? `${noiseSummary?.noiseFiles || 0} files · ${noiseSummary?.noiseLines || 0} hidden noise lines`
-          : "No noise signals available"}
+      {/* ── Filters: shrink the list to what still needs attention ── */}
+      <div className="flex items-center gap-4 px-2.5 pb-2 pt-1 border-b border-line">
+        <FilterCheckbox
+          label="Viewed"
+          on={includeViewed}
+          onClick={() => onIncludeViewedChange(!includeViewed)}
+          title="Keep files you've marked viewed in the list (struck through). Uncheck to hide them and focus on what's left."
+        />
+        <FilterCheckbox
+          label="Noise"
+          on={includeNoise}
+          disabled={noiseFileCount === 0}
+          count={noiseFileCount || undefined}
+          onClick={() => onIncludeNoiseChange(!includeNoise)}
+          title={
+            noiseFileCount > 0
+              ? "Show low-signal files flagged as likely review-irrelevant (lockfiles, generated output, etc.)."
+              : "No likely-noise files in this PR"
+          }
+        />
+        {hiddenByFilters > 0 && !normalizedQuery && (
+          <span className="ml-auto font-mono text-[10px] text-ink-4 [font-variant-numeric:tabular-nums]">
+            · {hiddenByFilters} hidden
+          </span>
+        )}
       </div>
 
       {isFilesystem ? (
@@ -439,9 +503,22 @@ export function LeftRail({
         </div>
       )}
 
+      {!normalizedQuery && files.length === 0 && (
+        <div className="px-3.5 py-6 text-center text-[11.5px] leading-[1.5] text-ink-3">
+          {reviewedCount >= totalFileCount && totalFileCount > 0
+            ? "✓ Every file reviewed."
+            : "Nothing left to show."}
+          {hiddenByFilters > 0 && (
+            <div className="mt-1 text-[10.5px] text-ink-4">
+              {hiddenByFilters} {hiddenByFilters === 1 ? "file" : "files"} hidden by filters
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="sticky bottom-0 px-3.5 py-2.5 border-t border-line bg-rail flex items-center gap-2 text-[11px]">
         <span className="font-mono text-ink-2 text-[11px]">
-          {reviewedCount}/{files.length}
+          {reviewedCount}/{totalFileCount}
         </span>
         <span className="flex-1 h-1 bg-bg-3 rounded-[2px] overflow-hidden">
           <span className="block h-full bg-ink rounded-[2px]" style={{ width: `${reviewedPct}%` }} />

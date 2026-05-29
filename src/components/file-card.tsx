@@ -139,6 +139,7 @@ export function FileCard({
   onSymbol,
   activeSym,
   reviewed,
+  changedSinceViewed,
   onToggleReviewed,
   onJumpToFile,
   onJumpToSymbol,
@@ -156,6 +157,7 @@ export function FileCard({
   onSymbol: SymbolHandler;
   activeSym: string | null;
   reviewed: boolean;
+  changedSinceViewed: boolean;
   onToggleReviewed: (file: PackFile) => void;
   onJumpToFile: FileJumpHandler;
   onJumpToSymbol: SymbolHandler;
@@ -351,6 +353,15 @@ export function FileCard({
       {!collapsed && file.note && (
         <div className="file-note sticky top-[calc(var(--file-head-sticky-top,74px)+49px)] z-[2] grid grid-cols-[6px_minmax(0,1fr)] items-start gap-[7px] border-b border-l-2 border-t border-b-[var(--line)] border-l-[var(--blue)] border-t-[color-mix(in_oklab,var(--line)_70%,transparent)] bg-[color-mix(in_oklab,var(--bg-3)_70%,var(--surface))] py-[6px] pl-[48px] pr-[16px] font-sans text-[12px] leading-[1.4] text-[var(--ink-2)] before:mt-[5px] before:h-[6px] before:w-[6px] before:rounded-full before:bg-[var(--blue)] before:content-['']">
           <span className="file-note-text min-w-0" dangerouslySetInnerHTML={{ __html: file.note || "" }} />
+        </div>
+      )}
+
+      {!collapsed && changedSinceViewed && file.changedNote && (
+        <div className="file-changed-note sticky top-[calc(var(--file-head-sticky-top,74px)+49px+(var(--file-note-offset,0px)))] z-[2] grid grid-cols-[6px_minmax(0,1fr)] items-start gap-[7px] border-b border-l-2 border-t border-b-[var(--line)] border-l-[var(--amber)] border-t-[color-mix(in_oklab,var(--line)_70%,transparent)] bg-[color-mix(in_oklab,var(--amber)_8%,var(--surface))] py-[6px] pl-[48px] pr-[16px] font-sans text-[12px] leading-[1.4] text-[var(--ink-2)] before:mt-[5px] before:h-[6px] before:w-[6px] before:rounded-full before:bg-[var(--amber)] before:content-['']">
+          <span className="min-w-0">
+            <span className="mb-[3px] block font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--amber)]">Seit last viewed</span>
+            <span className="file-changed-note-text min-w-0" dangerouslySetInnerHTML={{ __html: file.changedNote || "" }} />
+          </span>
         </div>
       )}
 

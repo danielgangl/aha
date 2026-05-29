@@ -3,16 +3,21 @@ import type {
   DecisionHandler,
   Decisions,
   FileJumpHandler,
+  Lens,
   Overview,
   PackFile,
+  RichRef,
   SetStatusHandler,
   StatusMap,
   SymbolHandler,
+  SymbolMap,
   TriageStatus,
 } from "../types";
 import { categoryLabel, hasOverviewContent } from "../lib/pack";
 import { AsciiPanel, RefList, RichText } from "./rich";
-import { DecisionCard } from "../decisions.js";
+import { CopyContextButton, DecisionCard, LensPill, ResolveZone } from "../decisions.js";
+import type { FocusItem } from "../lib/review-focus";
+import { buildReviewFocus, focusItemContext } from "../lib/review-focus";
 
 // ── Shared primitives (kept visually consistent with decisions.tsx) ──
 
@@ -61,9 +66,11 @@ export function HighLevelLeftRail({
     { key: "system-map", label: "System Map", count: overview?.systemMap ? 1 : 0 },
     { key: "model-deltas", label: "Model Deltas", count: overview?.modelDeltas?.length || 0 },
     { key: "flows", label: "Flows", count: overview?.flows?.length || 0 },
-    { key: "assumptions", label: "Assumptions", count: overview?.assumptions?.length || 0 },
-    { key: "hotspots", label: "Hotspots", count: overview?.hotspots?.length || 0 },
-    { key: "decisions", label: "Decisions", count: decisions?.cards?.length || 0 },
+    {
+      key: "review-focus",
+      label: "Review Focus",
+      count: (decisions?.cards?.length || 0) + (overview?.hotspots?.length || 0) + (overview?.assumptions?.length || 0),
+    },
   ];
   const actionIds = [
     ...(overview?.assumptions || []).map((item) => item.id),
@@ -113,6 +120,7 @@ export function HighLevelView({
   overview,
   decisions,
   files,
+  symbols,
   statusMap,
   setStatus,
   flashId,
@@ -123,6 +131,7 @@ export function HighLevelView({
   overview: Overview | null;
   decisions: Decisions;
   files: PackFile[];
+  symbols?: SymbolMap;
   statusMap: StatusMap;
   setStatus: (id: string, status: TriageStatus | null) => void;
   flashId: string | null;
@@ -131,8 +140,121 @@ export function HighLevelView({
   onDecision: DecisionHandler;
 }) {
   const hasOverview = overview && hasOverviewContent(overview);
-  const hasDecisions = (decisions?.cards?.length ?? 0) > 0;
-  if (!hasOverview && !hasDecisions) {
+
+  // Review Focus worklist (merged + sorted + bundled) — pure data lives in lib.
+  const { open: openFocus, resolved: resolvedFocus, nonAccepted: nonAcceptedFocus, nonAcceptedContext } =
+    buildReviewFocus(decisions, overview, statusMap, files);
+  const totalFocus = openFocus.length + resolvedFocus.length;
+  const hasFocus = totalFocus > 0;
+
+  const renderOpenFocus = (item: FocusItem) => {
+    if (item.decision) {
+      return (
+        <DecisionCard
+          key={item.id}
+          card={item.decision}
+          lens="decide"
+          categories={decisions.categories}
+          files={files}
+          symbols={symbols}
+          onSymbol={onSymbol}
+          onJump={onFile}
+          status={statusMap[item.id]}
+          onSetStatus={(status) => setStatus(item.id, status)}
+          flash={flashId === item.id}
+          inOverview
+        />
+      );
+    }
+    if (item.hotspot) {
+      return (
+        <FocusCard
+          key={item.id}
+          id={item.id}
+          lens="inspect"
+          title={<RichText value={item.hotspot.title} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
+          why={<RichText value={item.hotspot.why} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
+          refs={item.hotspot.refs}
+          status={statusMap[item.id]}
+          onSetStatus={(status) => setStatus(item.id, status)}
+          flash={flashId === item.id}
+          onSymbol={onSymbol}
+          onFile={onFile}
+          onDecision={onDecision}
+        />
+      );
+    }
+    if (item.assumption) {
+      return (
+        <FocusCard
+          key={item.id}
+          id={item.id}
+          lens="verify"
+          title={<RichText value={item.assumption.text} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
+          refs={item.assumption.refs}
+          status={statusMap[item.id]}
+          onSetStatus={(status) => setStatus(item.id, status)}
+          flash={flashId === item.id}
+          onSymbol={onSymbol}
+          onFile={onFile}
+          onDecision={onDecision}
+        />
+      );
+    }
+    return null;
+  };
+
+  const renderResolvedFocus = (item: FocusItem) => {
+    const status = statusMap[item.id];
+    // Hand non-accepted (flagged/blocked) items to an agent, any lens.
+    const copyContext =
+      status === "flag" || status === "block" ? focusItemContext(item, decisions, files, statusMap) : undefined;
+    if (item.decision) {
+      return (
+        <CompactReviewCard
+          key={item.id}
+          id={item.id}
+          kind="decide"
+          category={categoryLabel(item.decision.category, decisions.categories)}
+          risk={item.decision.risk}
+          title={item.decision.title}
+          status={status}
+          onSetStatus={(s) => setStatus(item.id, s)}
+          flash={flashId === item.id}
+          copyContext={copyContext}
+        />
+      );
+    }
+    if (item.hotspot) {
+      return (
+        <CompactReviewCard
+          key={item.id}
+          id={item.id}
+          kind="inspect"
+          title={<RichText value={item.hotspot.title} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
+          status={status}
+          onSetStatus={(s) => setStatus(item.id, s)}
+          copyContext={copyContext}
+        />
+      );
+    }
+    if (item.assumption) {
+      return (
+        <CompactReviewCard
+          key={item.id}
+          id={item.id}
+          kind="verify"
+          title={<RichText value={item.assumption.text} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
+          status={status}
+          onSetStatus={(s) => setStatus(item.id, s)}
+          copyContext={copyContext}
+        />
+      );
+    }
+    return null;
+  };
+
+  if (!hasOverview && !hasFocus) {
     return (
       // .overview-doc
       <div className="h-full">
@@ -258,117 +380,31 @@ export function HighLevelView({
           </section>
         )}
 
-        {(overview?.assumptions || []).length > 0 && (
-          <section className="mb-[26px] scroll-mt-[130px]" id="assumptions">
-            <SectionHead title="Load-Bearing Assumptions" meta={overview?.assumptions.length} />
-            {/* .overview-list */}
+        {hasFocus && (
+          <section className="mb-[26px] scroll-mt-[130px]" id="review-focus">
+            <SectionHead
+              title="Review Focus"
+              meta={
+                resolvedFocus.length === totalFocus
+                  ? "✓ all resolved"
+                  : `${resolvedFocus.length}/${totalFocus} resolved`
+              }
+            />
             <div className="grid gap-3">
-              {(overview?.assumptions || []).map((item, index) =>
-                statusMap[item.id] ? (
-                  <CompactReviewCard
-                    key={item.id}
-                    id={item.id}
-                    kind="assumption"
-                    number={index + 1}
-                    title={<RichText value={item.text} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
-                    status={statusMap[item.id]}
-                    onSetStatus={(status) => setStatus(item.id, status)}
-                  />
-                ) : (
-                  <OverviewActionCard
-                    key={item.id}
-                    id={item.id}
-                    kind="assumption"
-                    number={index + 1}
-                    status={statusMap[item.id]}
-                    onSetStatus={(status) => setStatus(item.id, status)}
-                  >
-                    {/* .overview-list-body */}
-                    <div className="min-w-0 text-[13.5px] leading-[1.55] text-ink">
-                      <RichText value={item.text} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />
-                      <RefList refs={item.refs} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />
-                    </div>
-                  </OverviewActionCard>
-                )
-              )}
-            </div>
-          </section>
-        )}
+              {openFocus.map((item) => renderOpenFocus(item))}
 
-        {(overview?.hotspots || []).length > 0 && (
-          <section className="mb-[26px] scroll-mt-[130px]" id="hotspots">
-            <SectionHead title="Risk Hotspots" meta={overview?.hotspots.length} />
-            <div className="grid gap-3">
-              {(overview?.hotspots || []).map((item, index) =>
-                statusMap[item.id] ? (
-                  <CompactReviewCard
-                    key={item.id}
-                    id={item.id}
-                    kind="hotspot"
-                    number={index + 1}
-                    title={<RichText value={item.title} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
-                    status={statusMap[item.id]}
-                    onSetStatus={(status) => setStatus(item.id, status)}
-                  />
-                ) : (
-                  <OverviewActionCard
-                    key={item.id}
-                    id={item.id}
-                    kind="hotspot"
-                    number={index + 1}
-                    status={statusMap[item.id]}
-                    onSetStatus={(status) => setStatus(item.id, status)}
-                  >
-                    {/* .overview-hotspot-content (plain grid container, no own rule) */}
-                    <div>
-                      {/* .overview-hotspot h3 */}
-                      <h3 className="m-0 font-sans text-sm leading-[1.35] font-semibold text-ink">
-                        <RichText value={item.title} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />
-                      </h3>
-                      {/* .overview-hotspot-why */}
-                      <div className="text-[13px] leading-[1.55] text-ink-2">
-                        <RichText value={item.why} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />
-                      </div>
-                      <RefList refs={item.refs} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />
-                    </div>
-                  </OverviewActionCard>
-                )
+              {resolvedFocus.length > 0 && (
+                <div className="flex items-center gap-[10px] pt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-4">
+                  <span>Resolved</span>
+                  <span className="font-mono">{resolvedFocus.length}</span>
+                  <span className="flex-1 h-px bg-line" />
+                  {nonAcceptedFocus.length > 0 && (
+                    <CopyContextButton text={nonAcceptedContext} label={`copy ${nonAcceptedFocus.length} for agent`} />
+                  )}
+                </div>
               )}
-            </div>
-          </section>
-        )}
 
-        {hasDecisions && (
-          <section className="mb-[26px] scroll-mt-[130px]" id="decisions">
-            <SectionHead title="Decisions" meta={decisions.cards.length} />
-            <div className="grid gap-3">
-              {decisions.cards.map((card) =>
-                statusMap[card.id] ? (
-                  <CompactReviewCard
-                    key={card.id}
-                    id={card.id}
-                    kind="decision"
-                    category={categoryLabel(card.category, decisions.categories)}
-                    risk={card.risk}
-                    title={card.title}
-                    status={statusMap[card.id]}
-                    onSetStatus={(status) => setStatus(card.id, status)}
-                    flash={flashId === card.id}
-                  />
-                ) : (
-                  <DecisionCard
-                    key={card.id}
-                    card={card}
-                    categories={decisions.categories}
-                    files={files}
-                    onJump={onFile}
-                    status={statusMap[card.id]}
-                    onSetStatus={(status) => setStatus(card.id, status)}
-                    flash={flashId === card.id}
-                    inOverview
-                  />
-                )
-              )}
+              {resolvedFocus.map((item) => renderResolvedFocus(item))}
             </div>
           </section>
         )}
@@ -410,42 +446,6 @@ function ModelDeltaCell({ label, children }: { label: string; children: ReactNod
   );
 }
 
-export function OverviewActionCard({
-  id,
-  kind,
-  number,
-  status,
-  onSetStatus,
-  children,
-}: {
-  id: string;
-  kind: string;
-  number?: number;
-  status: TriageStatus | undefined;
-  onSetStatus: SetStatusHandler;
-  children: ReactNode;
-}) {
-  // .overview-card .overview-action .dc-status-{status}
-  return (
-    <article
-      className={`${OVERVIEW_CARD_BASE} grid gap-[10px] scroll-mt-[130px] ${statusGradient(status)}`}
-      id={id}
-    >
-      {/* .dc-head .overview-action-head (margin-bottom 0) */}
-      <header className="flex items-center justify-between gap-3 mb-0">
-        {/* .dc-tags */}
-        <div className="flex gap-[6px] flex-wrap items-center">
-          <CatPill>{kind}</CatPill>
-          {number && <OverviewNum>{number}</OverviewNum>}
-          {status && <DecisionStatusPill status={status} />}
-        </div>
-        <DecisionTriage status={status} onSetStatus={onSetStatus} />
-      </header>
-      {children}
-    </article>
-  );
-}
-
 export function CompactReviewCard({
   id,
   kind,
@@ -456,6 +456,7 @@ export function CompactReviewCard({
   status,
   onSetStatus,
   flash,
+  copyContext,
 }: {
   id: string;
   kind: string;
@@ -466,6 +467,7 @@ export function CompactReviewCard({
   status: TriageStatus | undefined;
   onSetStatus: SetStatusHandler;
   flash?: boolean;
+  copyContext?: string;
 }) {
   // .overview-card .overview-action .overview-action-compact .dc-status-{status} [.flash]
   return (
@@ -489,7 +491,8 @@ export function CompactReviewCard({
         <h3 className="m-0 font-sans text-[13.5px] leading-[1.35] font-semibold text-ink [text-wrap:pretty]">{title}</h3>
       </div>
       {/* .overview-action-controls */}
-      <div className="self-center">
+      <div className="self-center flex items-center gap-2">
+        {copyContext && <CopyContextButton text={copyContext} />}
         <DecisionTriage status={status} onSetStatus={onSetStatus} />
       </div>
     </article>
@@ -497,6 +500,58 @@ export function CompactReviewCard({
 }
 
 // .overview-card base shared by both action cards
+// Canonical Review Focus card for the lighter lenses (inspect / verify): same
+// skeleton as a decision — lens tag, headline, prominent "why", refs, and the
+// resolve zone at the bottom — just without claim/check/code evidence.
+function FocusCard({
+  id,
+  lens,
+  title,
+  why,
+  refs,
+  status,
+  onSetStatus,
+  flash,
+  onSymbol,
+  onFile,
+  onDecision,
+}: {
+  id: string;
+  lens: Lens;
+  title: ReactNode;
+  why?: ReactNode;
+  refs?: RichRef[];
+  status: TriageStatus | undefined;
+  onSetStatus: SetStatusHandler;
+  flash?: boolean;
+  onSymbol: SymbolHandler;
+  onFile: FileJumpHandler;
+  onDecision: DecisionHandler;
+}) {
+  return (
+    <article
+      id={id}
+      className={`relative border border-line rounded-[12px] px-5 pt-[18px] pb-4 scroll-mt-[130px] bg-surface ${statusGradient(status)} ${flash ? "animate-[flashbg_1.6s_ease-out]" : ""}`}
+    >
+      <header className="flex items-center gap-[6px] flex-wrap mb-[6px]">
+        <LensPill lens={lens} />
+        {status && <DecisionStatusPill status={status} />}
+      </header>
+      <h3 className="font-sans font-semibold text-base leading-[1.3] tracking-[-0.008em] text-ink mt-[6px] mb-2 [text-wrap:pretty]">
+        {title}
+      </h3>
+      {why && (
+        <div className="text-[12.5px] leading-[1.55] text-ink-2 mt-0 mb-3 [text-wrap:pretty] pl-3 border-l-2 border-line-2">
+          <span className="block text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3 mb-1">Why it matters</span>
+          {why}
+        </div>
+      )}
+      {refs && refs.length > 0 && <RefList refs={refs} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
+      <ResolveZone status={status} onSetStatus={onSetStatus} />
+    </article>
+  );
+}
+
 const OVERVIEW_CARD_BASE = "bg-surface border border-line rounded-[9px] px-4 py-[14px]";
 
 // .overview-action.dc-status-{status} gradient backgrounds (overrides bg-surface)

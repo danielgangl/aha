@@ -8,6 +8,7 @@ import type {
   DiffSide,
   FileJumpHandler,
   FileNote,
+  PackFile,
   ReviewSignalPattern,
   SignalRange,
   SymbolHandler,
@@ -19,6 +20,7 @@ import {
   copyBlockAttrs,
   formatAnchorRange,
   highlightCode,
+  languageForPath,
   symbolKindForToken,
 } from "../lib/diff";
 
@@ -312,6 +314,90 @@ export function DiffRow({
       >
         <DiffCell ln={row.right} side="right" language={language} onSymbol={onSymbol} activeSym={activeSym} symbols={symbols} copyBlock={copyBlock?.right ?? null} copyVisible={hoveredCopyBlock === copyBlock?.right?.id} setOutlinedCopyBlock={setOutlinedCopyBlock} />
       </div>
+    </div>
+  );
+}
+
+// ── Reusable diff excerpt ──────────────────────────────────────
+// Renders a window of a file's REAL diff around an anchor line as a UNIFIED
+// single column (full width, no empty side), with an opt-in "show full file
+// diff". Lets code evidence live inline (e.g. inside decision cards) so the
+// reviewer never has to jump away. Syntax highlight + clickable symbols are the
+// same as the Code tab; the Code tab itself stays side-by-side.
+export function DiffExcerpt({
+  file,
+  anchorLine,
+  context = 3,
+  symbols,
+  onSymbol,
+  fontClass = "text-[11.5px]",
+}: {
+  file: PackFile;
+  anchorLine?: number | null;
+  context?: number;
+  symbols?: SymbolMap;
+  onSymbol?: SymbolHandler;
+  fontClass?: string;
+}) {
+  const [full, setFull] = useState(false);
+  // Unified: walk the diff lines in order, skipping hunk markers.
+  const lines = useMemo(() => file.diff.filter((line) => line.k !== "hunk"), [file.diff]);
+  const language = useMemo(() => languageForPath(file.path), [file.path]);
+  const anchorIdx = useMemo(() => {
+    if (anchorLine == null) return -1;
+    return lines.findIndex((line) => line.L === anchorLine || line.R === anchorLine);
+  }, [lines, anchorLine]);
+
+  const windowed = !full && anchorIdx >= 0;
+  const start = windowed ? Math.max(0, anchorIdx - context) : 0;
+  const end = windowed ? Math.min(lines.length, anchorIdx + context + 1) : lines.length;
+  const slice = lines.slice(start, end);
+  const hiddenAbove = start;
+  const hiddenBelow = lines.length - end;
+  const noop = () => {};
+  const toggle = (event: React.MouseEvent) => { event.stopPropagation(); setFull((value) => !value); };
+  const noteClass = "block w-full px-3 py-[3px] text-right bg-bg-2 text-[10px] text-ink-4 cursor-pointer hover:text-ink";
+
+  return (
+    <div className={`border border-line rounded-[6px] overflow-hidden bg-paper font-mono leading-[1.5] ${fontClass}`}>
+      {(hiddenAbove > 0 || full) && (
+        <button type="button" onClick={toggle} className={`${noteClass} border-b border-line`}>
+          {full ? "▴ collapse" : `⋯ ${hiddenAbove} ${hiddenAbove === 1 ? "line" : "lines"} above`}
+        </button>
+      )}
+      {slice.map((line, i) => {
+        const isAnchor = start + i === anchorIdx;
+        const tone = line.k === "add" ? "bg-add-bg" : line.k === "del" ? "bg-del-bg" : "";
+        const sig = line.k === "add" ? "+" : line.k === "del" ? "−" : "";
+        const sigTone = line.k === "add" ? "text-add-mark" : line.k === "del" ? "text-del-mark" : "text-ink-4";
+        return (
+          <div
+            key={i}
+            className={`grid grid-cols-[40px_16px_minmax(0,1fr)] items-baseline ${tone} ${
+              isAnchor
+                ? "relative before:absolute before:left-0 before:top-0 before:bottom-0 before:w-[2px] before:bg-blue before:content-['']"
+                : ""
+            }`}
+          >
+            <span className="pr-2 text-right text-ink-4 select-none [font-variant-numeric:tabular-nums]">
+              {line.R ?? line.L ?? ""}
+            </span>
+            <span className={`text-center select-none ${sigTone}`}>{sig}</span>
+            <span
+              className={`pr-3 [white-space:pre-wrap] [word-break:break-word] ${
+                line.k === "ctx" ? "text-ink-2" : "text-ink"
+              }`}
+            >
+              <CodeChunks c={line.c} language={language} onSymbol={onSymbol || noop} activeSym={null} symbols={symbols} />
+            </span>
+          </div>
+        );
+      })}
+      {(hiddenBelow > 0 || full) && (
+        <button type="button" onClick={toggle} className={`${noteClass} border-t border-line`}>
+          {full ? "▴ collapse" : `⋯ ${hiddenBelow} ${hiddenBelow === 1 ? "line" : "lines"} below`}
+        </button>
+      )}
     </div>
   );
 }

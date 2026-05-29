@@ -36,6 +36,7 @@ export interface PackFile {
   add?: number;
   del?: number;
   note?: string;
+  changedNote?: string;
   diff: DiffLine[];
   notes: FileNote[];
   group?: string;
@@ -293,6 +294,7 @@ export interface PackIndexEntry {
   kind: string;
   updatedAt: string;
   filesChanged: number;
+  reviewed: number;
 }
 
 export type TriageStatus = "accept" | "flag" | "block";
@@ -364,6 +366,8 @@ export type DecisionHandler = (id: string) => void;
 export type SetStatusHandler = (status: TriageStatus | null) => void;
 export type StatusMap = Record<string, TriageStatus>;
 export type NoiseMode = "focus" | "all" | "expanded";
+// Review Focus action type — what a worklist item asks the reviewer to do.
+export type Lens = "decide" | "inspect" | "verify";
 
 export interface RichHandlers {
   onSymbol: SymbolHandler;

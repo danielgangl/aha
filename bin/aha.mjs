@@ -184,6 +184,7 @@ async function generateFromPr({ prNumber, outPath, cwd }) {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, JSON.stringify(pack, null, 2) + "\n");
   JSON.parse(fs.readFileSync(outputPath, "utf8"));
+  warnIfOutsidePacks(outputPath);
   return outputPath;
 }
 
@@ -191,6 +192,21 @@ function defaultPackPathFor(pack) {
   const repo = slug(pack.repositoryName || pack.repoName || pack.repository?.name || "repo");
   const pr = slug(pack.number || "pr");
   return path.join(packsRoot, repo, pr, `aha-${slug(pack.branch || "branch")}-${pack.number}.json`);
+}
+
+// Surface when a pack is written outside the central packs/ library — e.g. an
+// agent workflow that resolved a relative --pack against the target repo's cwd
+// instead of the aha repo. Informational only; explicit standalone --out paths
+// stay allowed.
+function warnIfOutsidePacks(outputPath) {
+  const resolved = path.resolve(outputPath);
+  const rootWithSep = packsRoot.endsWith(path.sep) ? packsRoot : packsRoot + path.sep;
+  if (resolved.startsWith(rootWithSep)) return;
+  console.error(
+    `warning: pack is outside the central aha library (${packsRoot}).\n` +
+    `  wrote: ${resolved}\n` +
+    `  if this is an agent run, pass an absolute aha-repo pack path so it doesn't land in the target repo.`
+  );
 }
 
 function buildWorkflowPrompt(argv) {
@@ -259,6 +275,7 @@ async function updateFromPr({ prNumber, packPath, outPath, cwd }) {
     generatedAt: new Date().toISOString(),
   }, null, 2) + "\n");
   console.error(`report: ${updateReportPath}`);
+  warnIfOutsidePacks(outputPath);
   return outputPath;
 }
 
@@ -335,6 +352,10 @@ function mergePackFragment(pack, fragment, fragmentPath) {
       if (fragmentFile.note != null) {
         if (typeof fragmentFile.note !== "string") throw new CliError(`Fragment ${fragmentPath} file.note must be a string for ${file.path}`);
         file.note = fragmentFile.note;
+      }
+      if (fragmentFile.changedNote != null) {
+        if (typeof fragmentFile.changedNote !== "string") throw new CliError(`Fragment ${fragmentPath} file.changedNote must be a string for ${file.path}`);
+        file.changedNote = fragmentFile.changedNote;
       }
       if (fragmentFile.notes != null) {
         if (!Array.isArray(fragmentFile.notes)) throw new CliError(`Fragment ${fragmentPath} file.notes must be an array for ${file.path}`);
@@ -813,6 +834,9 @@ function mergeExistingEnrichment(basePack, existingPack) {
     if (!oldFile) continue;
     if (oldFile.diffFingerprint === file.diffFingerprint && typeof oldFile.note === "string") {
       file.note = oldFile.note;
+    }
+    if (oldFile.diffFingerprint === file.diffFingerprint && typeof oldFile.changedNote === "string") {
+      file.changedNote = oldFile.changedNote;
     }
     file.notes = preserveInlineNotes(oldFile.notes, oldFile, file);
   }
@@ -2263,7 +2287,19 @@ async function servePack({ packPath, openBrowser, port, host, empty = false }) {
   console.log(info);
 
   if (openBrowser) {
-    spawn("open", [info], { stdio: "ignore", detached: true }).unref();
+    // Deep-link an explicit pack straight into the viewer; the bare URL lands
+    // on the dashboard.
+    let openUrl = info;
+    if (packPath) {
+      try {
+        const url = new URL(info);
+        url.searchParams.set("pack", packEntryForFile(packPath).id);
+        openUrl = url.toString();
+      } catch {
+        openUrl = info;
+      }
+    }
+    spawn("open", [openUrl], { stdio: "ignore", detached: true }).unref();
   }
 }
 
@@ -2409,6 +2445,76 @@ function ahaJsonPlugin(packFile, runtime = {}) {
           res.end(JSON.stringify({ error: error.message }) + "\n");
         }
       });
+      // Repos the dashboard may initialize from. Names only — paths stay here.
+      server.middlewares.use("/aha-repos.json", (_req, res) => {
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        const repos = readLocalRepos().map((repo) => ({ name: repo.name }));
+        res.end(JSON.stringify({ repos }, null, 2) + "\n");
+      });
+      // Deterministic init: run the existing `generate` path against an
+      // allowlisted repo + numeric PR, then hand back the new pack id so the
+      // app can open it. No AI here — that stays a later step.
+      server.middlewares.use("/aha-generate", async (req, res) => {
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ error: "Method not allowed" }) + "\n");
+          return;
+        }
+        if (runtime.empty) {
+          res.statusCode = 403;
+          res.end(JSON.stringify({ error: "Initializing is disabled in the empty viewer" }) + "\n");
+          return;
+        }
+        if (!isLocalOrigin(req)) {
+          res.statusCode = 403;
+          res.end(JSON.stringify({ error: "Cross-origin request rejected" }) + "\n");
+          return;
+        }
+        try {
+          const body = await readRequestBody(req, 64 * 1024);
+          const payload = JSON.parse(body || "{}");
+          const pr = String(payload?.pr ?? "").trim();
+          if (!/^\d+$/.test(pr)) throw new CliError("PR number must be digits.");
+          const repoPath = resolveRepoForGenerate(payload);
+          const outputPath = await generateFromPr({ prNumber: pr, cwd: repoPath });
+          const entry = packEntryForFile(outputPath);
+          res.end(JSON.stringify({ ok: true, id: entry.id, path: outputPath, pr, repo: entry.repo }) + "\n");
+        } catch (error) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }) + "\n");
+        }
+      });
+      // Delete a pack (and its sidecars/fragments) from the library.
+      server.middlewares.use("/aha-delete", async (req, res) => {
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ error: "Method not allowed" }) + "\n");
+          return;
+        }
+        if (runtime.empty) {
+          res.statusCode = 403;
+          res.end(JSON.stringify({ error: "Deleting is disabled in the empty viewer" }) + "\n");
+          return;
+        }
+        if (!isLocalOrigin(req)) {
+          res.statusCode = 403;
+          res.end(JSON.stringify({ error: "Cross-origin request rejected" }) + "\n");
+          return;
+        }
+        try {
+          const body = await readRequestBody(req, 64 * 1024);
+          const payload = JSON.parse(body || "{}");
+          res.end(JSON.stringify(deletePackById(String(payload?.id || ""))) + "\n");
+        } catch (error) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }) + "\n");
+        }
+      });
     },
   };
 }
@@ -2496,7 +2602,104 @@ function packEntryForFile(file) {
     kind: path.basename(resolved).startsWith("reviewpack-") ? "reviewpack" : "aha",
     updatedAt: stat.mtime.toISOString(),
     filesChanged: Array.isArray(pack.files) ? pack.files.length : 0,
+    reviewed: reviewedCountForPack(resolved),
   };
+}
+
+// Cheap glance at how far a pack's local review got — drives the dashboard
+// progress bar without the client having to fetch every state sidecar.
+function reviewedCountForPack(packFile) {
+  try {
+    const stateFile = stateFileForPack(packFile);
+    if (!fs.existsSync(stateFile)) return 0;
+    const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+    if (Array.isArray(state.viewed)) return state.viewed.length;
+    if (state.viewedFiles && typeof state.viewedFiles === "object") return Object.keys(state.viewedFiles).length;
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
+// Target repos the served app may initialize PRs from. Names only ever cross to
+// the browser; the absolute path stays server-side so init is a fixed allowlist.
+function readLocalRepos() {
+  try {
+    const raw = fs.readFileSync(path.join(root, ".aha.local.json"), "utf8");
+    const repos = JSON.parse(raw)?.repos;
+    if (!Array.isArray(repos)) return [];
+    return repos
+      .map((repo) => ({
+        name: String(repo?.name || "").trim() || (repo?.path ? path.basename(String(repo.path)) : ""),
+        path: String(repo?.path || "").trim(),
+      }))
+      .filter((repo) => repo.name && repo.path);
+  } catch {
+    return [];
+  }
+}
+
+function resolveRepoForGenerate(payload) {
+  const repos = readLocalRepos();
+  const requested = String(payload?.repo || "").trim();
+  if (requested) {
+    const match = repos.find((repo) => repo.name === requested || repo.path === requested);
+    if (!match) throw new CliError(`Unknown repo "${requested}". Register it under "repos" in .aha.local.json.`);
+    return match.path;
+  }
+  if (repos.length === 1) return repos[0].path;
+  throw new CliError("No repo selected. Register repos under \"repos\" in .aha.local.json and pick one.");
+}
+
+// Reject cross-origin POSTs so a stray web page can't drive command execution
+// against the localhost server (CSRF / DNS-rebind). Same-origin fetches from the
+// aha page itself either omit Origin or carry a localhost one.
+function isLocalOrigin(req) {
+  const origin = req.headers?.origin;
+  if (!origin) return true;
+  try {
+    const host = new URL(origin).hostname;
+    return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+// Delete a library pack and everything that belongs to it: the pack file, its
+// basename-prefixed sidecars/backups (.state.json, .update-report.json,
+// .pre-*), and — once no servable pack remains in the PR folder — the orphaned
+// fragments plus the now-empty directory chain. Refuses anything outside
+// packsRoot or served from an explicit external --pack.
+function deletePackById(id) {
+  if (!id || typeof id !== "string") throw new CliError("Missing pack id.");
+  if (id.startsWith("external/")) throw new CliError("This pack is served from outside the library and can't be deleted here.");
+  const resolved = path.resolve(packsRoot, id);
+  const rootWithSep = packsRoot.endsWith(path.sep) ? packsRoot : packsRoot + path.sep;
+  if (!resolved.startsWith(rootWithSep)) throw new CliError("Pack id escapes the library.");
+  if (!fs.existsSync(resolved) || !isServablePackFile(resolved)) throw new CliError("Pack not found.");
+
+  const dir = path.dirname(resolved);
+  const packBasename = path.basename(resolved);
+  const base = path.basename(resolved, path.extname(resolved));
+  for (const entry of fs.readdirSync(dir)) {
+    if (entry === packBasename || entry.startsWith(`${base}.`)) {
+      fs.rmSync(path.join(dir, entry), { force: true, recursive: true });
+    }
+  }
+
+  const stillHasPack = fs.readdirSync(dir).some((entry) => {
+    const full = path.join(dir, entry);
+    return fs.statSync(full).isFile() && isServablePackFile(full);
+  });
+  if (!stillHasPack) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    let parent = path.dirname(dir);
+    while (parent.startsWith(rootWithSep) && fs.existsSync(parent) && fs.readdirSync(parent).length === 0) {
+      fs.rmdirSync(parent);
+      parent = path.dirname(parent);
+    }
+  }
+  return { ok: true, id };
 }
 
 function packForServing(packFile) {
