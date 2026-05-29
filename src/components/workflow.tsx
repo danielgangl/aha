@@ -164,7 +164,7 @@ export function workflowCommands(pr: Pr, runtime: Runtime = DEFAULT_RUNTIME): Wo
     {
       key: "generate-out",
       title: "Generate with explicit output",
-      text: `cd /path/to/target-repo\n${ahaCommand("generate", { cliCommand, prNumber, packPath: `.aha/aha-base-${prNumber}.json` })}`,
+      text: `cd /path/to/target-repo\n${ahaCommand("generate", { cliCommand, prNumber, packPath: `/absolute/path/to/aha/packs/<repo>/${prNumber}/aha-base-${prNumber}.json` })}`,
     },
     {
       key: "review",

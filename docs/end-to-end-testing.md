@@ -189,7 +189,7 @@ AHA=<path-to-aha>/bin/aha.mjs
 
 cd "$ROOT"
 "$AHA" generate --pr "$PR"
-PACK=$(ls -1 .aha/aha-*.json | head -1)
+PACK=$(find <path-to-aha>/packs -name "aha-*.json" -print | head -1)
 "$AHA" normalize --pack "$PACK"
 ```
 

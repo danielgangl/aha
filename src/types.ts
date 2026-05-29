@@ -282,6 +282,19 @@ export interface Runtime {
   ahaCli: string;
 }
 
+export interface PackIndexEntry {
+  id: string;
+  path: string;
+  repo: string;
+  pr: string | number;
+  title: string;
+  branch: string;
+  base: string;
+  kind: string;
+  updatedAt: string;
+  filesChanged: number;
+}
+
 export type TriageStatus = "accept" | "flag" | "block";
 
 export interface ViewedFileEntry {

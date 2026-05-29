@@ -100,8 +100,8 @@ function StepInfo({ label, hint }: { label: string; hint: string }) {
 
 export function EmptyOnboarding({ runtime = DEFAULT_RUNTIME }: { runtime?: Runtime }) {
   const cliCommand = runtime.ahaCli || DEFAULT_RUNTIME.ahaCli;
-  const packPath = ".aha/aha-<branch>-<pr-number>.json";
-  const openExistingCommand = ahaCommand("review", { cliCommand, packPath: "/absolute/path/to/aha.json" });
+  const packPath = "/absolute/path/to/aha/packs/<repo>/<pr-number>/aha-<branch>-<pr-number>.json";
+  const openExistingCommand = ahaCommand("review", { cliCommand, packPath });
   const generateCommand = `PR_NUMBER="$(gh pr view --json number -q .number)"\n${ahaCommand("generate-auto", { cliCommand, prNumber: '"$PR_NUMBER"' })}`;
   const generateAndServeCommand = `AHA_CLI=${cliCommand}\nPR_NUMBER="$(gh pr view --json number -q .number)"\nPACK_PATH="$("$AHA_CLI" generate --pr "$PR_NUMBER" | tail -n 1)"\n"$AHA_CLI" serve --pack "$PACK_PATH" --port 4173 --host 127.0.0.1`;
   const fullWorkflowPrompt = fillAhaWorkflowPrompt(AHA_FULL_WORKFLOW_INIT_PROMPT, {
@@ -278,7 +278,7 @@ export function UpdateModal({ runtime = DEFAULT_RUNTIME, onClose }: { runtime?: 
     cliCommand,
     targetRepo: "",
     prNumber: "",
-    packPath: ".aha/aha-<branch>-<pr-number>.json",
+    packPath: "/absolute/path/to/aha/packs/<repo>/<pr-number>/aha-<branch>-<pr-number>.json",
   });
 
   return (

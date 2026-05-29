@@ -16,11 +16,13 @@ const ahaBin = path.join(repoRoot, "bin", "aha.mjs");
 
 test("generate creates a deterministic path-only aha from a PR diff", async () => {
   const fixture = await createBlackboxFixture({ patch: PATCH_V1 });
-  const packPath = path.join(fixture.repo, ".aha", "generated.json");
 
-  await runAha(fixture, ["generate", "--pr", "42", "--out", packPath]);
+  const { stdout } = await runAha(fixture, ["generate", "--pr", "42"]);
+  const packPath = stdout.trim().split(/\n/).at(-1);
 
   const pack = await readJson(packPath);
+  assert.equal(path.dirname(packPath), path.join(fixture.packsDir, "target", "42"));
+  assert.equal(fs.existsSync(path.join(fixture.repo, ".aha")), false);
   assert.equal(pack.number, 42);
   assert.equal(pack.title, "Add explicit material base channel");
   assert.equal(pack.branch, "feature/material-base-channel");
@@ -93,8 +95,8 @@ test("normalize canonicalizes legacy file ids and sidecar references to paths", 
 
 test("update refreshes diff truth, writes a report and leaves local review state alone", async () => {
   const fixture = await createBlackboxFixture({ patch: PATCH_V1 });
-  const packPath = path.join(fixture.repo, ".aha", "aha-feature-material-base-channel-42.json");
-  await runAha(fixture, ["generate", "--pr", "42", "--out", packPath]);
+  const { stdout } = await runAha(fixture, ["generate", "--pr", "42"]);
+  const packPath = stdout.trim().split(/\n/).at(-1);
 
   const oldPack = await readJson(packPath);
   const pricing = oldPack.files.find((file) => file.path === "src/pricing.ts");
@@ -160,10 +162,10 @@ test("update refreshes diff truth, writes a report and leaves local review state
 
 test("merge combines AI fragment files without rewriting deterministic diff truth", async () => {
   const fixture = await createBlackboxFixture({ patch: PATCH_V1 });
-  const packPath = path.join(fixture.repo, ".aha", "aha-feature-material-base-channel-42.json");
-  await runAha(fixture, ["generate", "--pr", "42", "--out", packPath]);
+  const { stdout } = await runAha(fixture, ["generate", "--pr", "42"]);
+  const packPath = stdout.trim().split(/\n/).at(-1);
   const before = await readJson(packPath);
-  const fragmentsDir = path.join(fixture.repo, ".aha", "fragments");
+  const fragmentsDir = path.join(path.dirname(packPath), "fragments");
   const codeContextPath = path.join(fragmentsDir, "code-context.json");
   const signalsPath = path.join(fragmentsDir, "review-signals.json");
   const judgmentPath = path.join(fragmentsDir, "review-judgment.json");
@@ -274,6 +276,33 @@ test("start serves an empty in-memory aha without a pack file", async () => {
   }
 });
 
+test("serve without --pack exposes the central pack library and selected pack", async () => {
+  const fixture = await createBlackboxFixture({ patch: PATCH_V1 });
+  const { stdout } = await runAha(fixture, ["generate", "--pr", "42"]);
+  const packPath = stdout.trim().split(/\n/).at(-1);
+  const fragmentsDir = path.join(path.dirname(packPath), "fragments");
+  await writeJson(path.join(fragmentsDir, "code-context.json"), {
+    files: [{ path: "src/pricing.ts", note: "<p>Fragment, not a pack.</p>" }],
+  });
+  const port = await freePort();
+  const child = spawn("node", [ahaBin, "serve", "--port", String(port)], {
+    cwd: fixture.repo,
+    env: fixture.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  try {
+    const index = await waitForJson(`http://127.0.0.1:${port}/aha-packs.json`);
+    assert.equal(index.packs.length, 1);
+    assert.equal(index.packs[0].id, "target/42/aha-feature-material-base-channel-42.json");
+    assert.equal(index.packs[0].path, packPath);
+    const pack = await waitForJson(`http://127.0.0.1:${port}/aha.json?pack=${encodeURIComponent(index.packs[0].id)}`);
+    assert.equal(pack.number, 42);
+    assert.equal(pack.title, "Add explicit material base channel");
+  } finally {
+    child.kill();
+  }
+});
+
 test("prompt prints substituted full workflow instructions", async () => {
   const fixture = await createBlackboxFixture({ patch: PATCH_V1 });
   const { stdout: initPrompt } = await runAha(fixture, [
@@ -285,7 +314,7 @@ test("prompt prints substituted full workflow instructions", async () => {
     "--pr",
     "42",
     "--pack",
-    ".aha/aha-feature-material-base-channel-42.json",
+    path.join(fixture.packsDir, "target", "42", "aha-feature-material-base-channel-42.json"),
   ]);
   assert.match(initPrompt, /Mode: init/);
   assert.match(initPrompt, /AHA_CLI=.*aha\.mjs/);
@@ -295,7 +324,10 @@ test("prompt prints substituted full workflow instructions", async () => {
   assert.match(initPrompt, /--- REVIEW SIGNALS PASS ---/);
   assert.match(initPrompt, /--- REVIEW JUDGMENT PASS ---/);
   assert.match(initPrompt, /--- FRAGMENT MERGE CONTRACT ---/);
-  assert.match(initPrompt, /"\$AHA_CLI" merge --pack "\$PACK_PATH" --fragments \.aha\/fragments\/code-context\.json,\.aha\/fragments\/review-signals\.json,\.aha\/fragments\/review-judgment\.json/);
+  assert.match(initPrompt, /PACK_DIR="\$\(dirname "\$PACK_PATH"\)"/);
+  assert.match(initPrompt, /FRAGMENTS_DIR="\$PACK_DIR\/fragments"/);
+  assert.match(initPrompt, /FRAGMENT_LIST="\$FRAGMENTS_DIR\/code-context\.json,\$FRAGMENTS_DIR\/review-signals\.json,\$FRAGMENTS_DIR\/review-judgment\.json"/);
+  assert.match(initPrompt, /"\$AHA_CLI" merge --pack "\$PACK_PATH" --fragments "\$FRAGMENT_LIST"/);
   assert.match(initPrompt, /If the user explicitly asks, you can start the viewer/);
   assert.match(initPrompt, /"\$AHA_CLI" serve --pack "\$PACK_PATH" --port 4173 --host 127\.0\.0\.1/);
   assert.match(initPrompt, /do not use `nohup \.\.\. &`/);
@@ -303,9 +335,10 @@ test("prompt prints substituted full workflow instructions", async () => {
   assert.match(initPrompt, /reviewSignals noise ranges count/);
   assert.match(initPrompt, /reviewSignals context ranges count/);
   assert.match(initPrompt, /Subagents write JSON fragment files only/);
-  assert.match(initPrompt, /Save only \.aha\/fragments\/code-context\.json/);
-  assert.match(initPrompt, /Save only \.aha\/fragments\/review-signals\.json/);
-  assert.match(initPrompt, /Save only \.aha\/fragments\/review-judgment\.json/);
+  assert.match(initPrompt, /Give each subagent the matching pass prompt below 1:1/);
+  assert.match(initPrompt, /Save only \$FRAGMENTS_DIR\/code-context\.json/);
+  assert.match(initPrompt, /Save only \$FRAGMENTS_DIR\/review-signals\.json/);
+  assert.match(initPrompt, /Save only \$FRAGMENTS_DIR\/review-judgment\.json/);
   assert.match(initPrompt, /Default to the current working repository and the current branch PR/);
   assert.match(initPrompt, /if \[ -z "\$TARGET_REPO" \]; then TARGET_REPO="\$\(pwd\)"; fi/);
   assert.match(initPrompt, /if \[ -z "\$PR_NUMBER" \]; then PR_NUMBER="\$\(gh pr view --json number -q \.number\)"; fi/);
@@ -323,11 +356,12 @@ test("prompt prints substituted full workflow instructions", async () => {
     "--pr",
     "42",
     "--pack",
-    ".aha/aha-feature-material-base-channel-42.json",
+    path.join(fixture.packsDir, "target", "42", "aha-feature-material-base-channel-42.json"),
   ]);
   assert.match(updatePrompt, /Mode: update/);
   assert.match(updatePrompt, /"\$AHA_CLI" update --pr "\$PR_NUMBER" --pack "\$PACK_PATH"/);
-  assert.match(updatePrompt, /"\$AHA_CLI" merge --pack "\$PACK_PATH" --fragments \.aha\/fragments\/code-context\.json,\.aha\/fragments\/review-signals\.json,\.aha\/fragments\/review-judgment\.json/);
+  assert.match(updatePrompt, /"\$AHA_CLI" merge --pack "\$PACK_PATH" --fragments "\$FRAGMENT_LIST"/);
+  assert.match(updatePrompt, /Give each subagent the matching pass prompt below 1:1/);
   assert.match(updatePrompt, /updateReport\.backupPath/);
 });
 
@@ -336,6 +370,7 @@ async function createBlackboxFixture({ patch }) {
   const repo = path.join(temp, "target");
   const bin = path.join(temp, "bin");
   const patchPath = path.join(temp, "patch.diff");
+  const packsDir = path.join(temp, "aha-packs");
   await mkdir(repo, { recursive: true });
   await mkdir(bin, { recursive: true });
   await execFileAsync("git", ["init", "-b", "main"], { cwd: repo });
@@ -354,7 +389,9 @@ async function createBlackboxFixture({ patch }) {
       ...process.env,
       PATH: `${bin}${path.delimiter}${process.env.PATH}`,
       AHA_FAKE_PATCH: patchPath,
+      AHA_PACKS_DIR: packsDir,
     },
+    packsDir,
   };
 }
 

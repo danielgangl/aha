@@ -8,6 +8,7 @@ import type {
   FileSignal,
   NoiseMode,
   Overview,
+  PackIndexEntry,
   PackFile,
   Pr,
   PersistedReviewState,
@@ -61,11 +62,17 @@ function App({
   runtime = DEFAULT_RUNTIME,
   initialReviewState,
   initialReviewStateAvailable,
+  packIndex,
+  selectedPackId,
+  onSelectPack,
 }: {
   pr: Pr;
   runtime?: Runtime;
   initialReviewState: ReviewState | null;
   initialReviewStateAvailable: boolean;
+  packIndex: PackIndexEntry[];
+  selectedPackId: string;
+  onSelectPack: (id: string) => void;
 }) {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const initialReadingMode = pr.readingOrders[0]?.key || "default";
@@ -150,8 +157,8 @@ function App({
       decisions: decisionStatus,
       updatedAt: new Date().toISOString(),
     };
-    persistReviewState(reviewStateKey, state);
-  }, [decisionStatus, reviewed, viewedFileMap, reviewStateKey]);
+    persistReviewState(reviewStateKey, state, selectedPackId);
+  }, [decisionStatus, reviewed, selectedPackId, viewedFileMap, reviewStateKey]);
 
   const onSymbol = useCallback((id: string) => {
     setActiveSymId(id);
@@ -358,6 +365,20 @@ function App({
           <span className="w-[14px] h-[14px] rounded-[4px] bg-ink relative before:content-[''] before:absolute before:inset-[3px] before:border-[1.5px] before:border-rail before:rounded-[1px]" />
           <span>aha</span>
         </div>
+        {packIndex.length > 0 && (
+          <select
+            className="h-[26px] max-w-[300px] rounded-[6px] border border-line bg-bg-3 px-[8px] font-mono text-[11px] text-ink-2 outline-none hover:border-line-2 focus:border-blue focus:text-ink"
+            value={selectedPackId}
+            onChange={(event) => onSelectPack(event.target.value)}
+            title="Select aha pack"
+          >
+            {packIndex.map((pack) => (
+              <option key={pack.id} value={pack.id}>
+                {pack.repo} #{pack.pr} · {pack.title}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="inline-flex items-center gap-[6px] text-ink-3 text-[12.5px]">
           <span className="text-ink-2">{repositoryName}</span>
           <span className="text-ink-4">/</span>
@@ -581,30 +602,47 @@ interface ReviewStateResult {
 
 type LoaderState =
   | { status: "loading" }
-  | { status: "ready"; pr: Pr; runtime: Runtime; reviewState: ReviewState | null; reviewStateAvailable: boolean }
+  | { status: "ready"; pr: Pr; runtime: Runtime; reviewState: ReviewState | null; reviewStateAvailable: boolean; packIndex: PackIndexEntry[]; selectedPackId: string }
   | { status: "error"; error: Error };
 
 function AhaLoader() {
   const [state, setState] = useState<LoaderState>({ status: "loading" });
+  const [selectedPackId, setSelectedPackId] = useState(() => selectedPackFromLocation());
 
   useEffect(() => {
     let alive = true;
-    const packRequest = fetch("/aha.json", { cache: "no-store" })
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to load aha.json (${res.status})`);
-        return res.json();
-      });
-    const stateRequest: Promise<ReviewStateResult> = fetch("/aha-state.json", { cache: "no-store" })
-      .then((res) => (res.ok
-        ? res.json().then((data: unknown) => ({ available: true, data }))
-        : { available: false, data: null }))
-      .catch(() => ({ available: false, data: null }));
-    const runtimeRequest = fetch("/aha-runtime.json", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : DEFAULT_RUNTIME))
-      .catch(() => DEFAULT_RUNTIME);
+    setState({ status: "loading" });
 
-    Promise.all([packRequest, stateRequest, runtimeRequest])
-      .then(([pack, reviewStateResult, runtime]) => {
+    async function load() {
+      const runtimeRequest = fetch("/aha-runtime.json", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : DEFAULT_RUNTIME))
+        .catch(() => DEFAULT_RUNTIME);
+      const indexResponse = await fetch(packUrl("/aha-packs.json", selectedPackId), { cache: "no-store" });
+      const indexPayload = indexResponse.ok ? await indexResponse.json() : { packs: [], selectedId: selectedPackId };
+      const packIndex = normalizePackIndex(indexPayload?.packs);
+      const requestedPackIsAvailable = selectedPackId && packIndex.some((pack) => pack.id === selectedPackId);
+      const actualSelectedPackId = requestedPackIsAvailable
+        ? selectedPackId
+        : (typeof indexPayload?.selectedId === "string" ? indexPayload.selectedId : "") || packIndex[0]?.id || "";
+      if (actualSelectedPackId && actualSelectedPackId !== selectedPackFromLocation()) {
+        setPackLocation(actualSelectedPackId);
+      }
+      const packRequest = fetch(packUrl("/aha.json", actualSelectedPackId), { cache: "no-store" })
+        .then((res) => {
+          if (!res.ok) throw new Error(`Failed to load aha.json (${res.status})`);
+          return res.json();
+        });
+      const stateRequest: Promise<ReviewStateResult> = fetch(packUrl("/aha-state.json", actualSelectedPackId), { cache: "no-store" })
+        .then((res) => (res.ok
+          ? res.json().then((data: unknown) => ({ available: true, data }))
+          : { available: false, data: null }))
+        .catch(() => ({ available: false, data: null }));
+      const [pack, reviewStateResult, runtime] = await Promise.all([packRequest, stateRequest, runtimeRequest]);
+      return { pack, reviewStateResult, runtime, packIndex, actualSelectedPackId };
+    }
+
+    load()
+      .then(({ pack, reviewStateResult, runtime, packIndex, actualSelectedPackId }) => {
         const pr = normalizeAhaPack(pack);
         if (alive) {
           setState({
@@ -613,6 +651,8 @@ function AhaLoader() {
             runtime: normalizeRuntime(runtime),
             reviewState: reviewStateResult.available ? normalizeReviewState(reviewStateResult.data, pr) : null,
             reviewStateAvailable: reviewStateResult.available,
+            packIndex,
+            selectedPackId: actualSelectedPackId,
           });
         }
       })
@@ -627,7 +667,7 @@ function AhaLoader() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [selectedPackId]);
 
   if (state.status === "loading") {
     return <div className="min-h-screen grid place-content-center gap-[8px] bg-bg text-ink-2">Loading aha.json…</div>;
@@ -644,12 +684,50 @@ function AhaLoader() {
 
   return (
     <App
+      key={state.selectedPackId || `${state.pr.repositoryName}:${state.pr.number}`}
       pr={state.pr}
       runtime={state.runtime}
       initialReviewState={state.reviewState}
       initialReviewStateAvailable={state.reviewStateAvailable}
+      packIndex={state.packIndex}
+      selectedPackId={state.selectedPackId}
+      onSelectPack={setSelectedPackId}
     />
   );
+}
+
+function selectedPackFromLocation(): string {
+  return new URLSearchParams(window.location.search).get("pack") || "";
+}
+
+function setPackLocation(packId: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("pack", packId);
+  window.history.replaceState(null, "", url);
+}
+
+function packUrl(pathname: string, packId: string): string {
+  if (!packId) return pathname;
+  return `${pathname}?pack=${encodeURIComponent(packId)}`;
+}
+
+function normalizePackIndex(value: unknown): PackIndexEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+    .map((entry) => ({
+      id: typeof entry.id === "string" ? entry.id : "",
+      path: typeof entry.path === "string" ? entry.path : "",
+      repo: typeof entry.repo === "string" ? entry.repo : "",
+      pr: typeof entry.pr === "string" || typeof entry.pr === "number" ? entry.pr : "",
+      title: typeof entry.title === "string" ? entry.title : "",
+      branch: typeof entry.branch === "string" ? entry.branch : "",
+      base: typeof entry.base === "string" ? entry.base : "",
+      kind: typeof entry.kind === "string" ? entry.kind : "",
+      updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
+      filesChanged: Number.isFinite(Number(entry.filesChanged)) ? Number(entry.filesChanged) : 0,
+    }))
+    .filter((entry) => entry.id);
 }
 
 function normalizeRuntime(runtime: unknown): Runtime {
@@ -1394,9 +1472,9 @@ function slugForStorage(value: unknown): string {
     .slice(0, 160) || "unknown";
 }
 
-function persistReviewState(key: string, state: PersistedReviewState): void {
+function persistReviewState(key: string, state: PersistedReviewState, selectedPackId = ""): void {
   localStorage.setItem(key, JSON.stringify(state));
-  fetch("/aha-state.json", {
+  fetch(packUrl("/aha-state.json", selectedPackId), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(state),

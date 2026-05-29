@@ -4,9 +4,9 @@ export const AHA_TARGET_REPO_PLACEHOLDER = "<target-repo>";
 export const AHA_PR_PLACEHOLDER = "<pr-number>";
 export const AHA_PACK_PLACEHOLDER = "<aha.json>";
 export const AHA_FRAGMENT_PATHS = [
-  ".aha/fragments/code-context.json",
-  ".aha/fragments/review-signals.json",
-  ".aha/fragments/review-judgment.json",
+  "$FRAGMENTS_DIR/code-context.json",
+  "$FRAGMENTS_DIR/review-signals.json",
+  "$FRAGMENTS_DIR/review-judgment.json",
 ];
 export const AHA_FRAGMENT_LIST = AHA_FRAGMENT_PATHS.join(",");
 
@@ -36,7 +36,7 @@ export function fillAhaWorkflowPrompt(template, options = {}) {
     .replaceAll(AHA_CLI_PLACEHOLDER, options.cliCommand || AHA_CLI_PLACEHOLDER)
     .replaceAll(AHA_TARGET_REPO_PLACEHOLDER, options.targetRepo ?? "")
     .replaceAll(AHA_PR_PLACEHOLDER, options.prNumber == null ? "" : String(options.prNumber))
-    .replaceAll(AHA_PACK_PLACEHOLDER, options.packPath || "/absolute/path/to/aha.json");
+    .replaceAll(AHA_PACK_PLACEHOLDER, options.packPath || "/absolute/path/to/aha-repo/packs/<repo>/<pr>/aha-<branch>-<pr>.json");
 }
 
 export const AHA_CODE_CONTEXT_PROMPT = String.raw({ raw: [`You are working inside the target repository for this PR.
@@ -47,7 +47,7 @@ Create the code-context fragment for an existing aha, without changing the deter
 Input:
 - Read the generated aha file provided by the orchestrator.
 - Write only this fragment file:
-  .aha/fragments/code-context.json
+  $FRAGMENTS_DIR/code-context.json
 
 Important constraints:
 - Do not change files[].diff.
@@ -58,7 +58,7 @@ Important constraints:
 - Do not push.
 - Do not run mutation commands.
 - Do not edit the main aha JSON file.
-- Only write .aha/fragments/code-context.json.
+- Only write $FRAGMENTS_DIR/code-context.json.
 
 You may inspect the repository source code to understand callsites, ownership boundaries, tests, and behavior.
 
@@ -247,7 +247,7 @@ The fragment may contain these fields only:
    - Keep labels and why text short, concrete, and German.
 
 Output:
-- Save only .aha/fragments/code-context.json.
+- Save only $FRAGMENTS_DIR/code-context.json.
 - Do not print the full JSON.
 - Reply only with:
   - fragment file path
@@ -274,7 +274,7 @@ Critical rules:
 - Do not duplicate readingOrders.
 - Do not include Scope Boundary.
 - Do not edit the main aha JSON file.
-- Only write .aha/fragments/review-judgment.json.
+- Only write $FRAGMENTS_DIR/review-judgment.json.
 
 Language:
 - Write all user-facing generated text in German.
@@ -510,7 +510,7 @@ Style:
 - If the aha lacks the information for a section, omit it rather than hallucinate.
 
 Return:
-- Save only .aha/fragments/review-judgment.json.
+- Save only $FRAGMENTS_DIR/review-judgment.json.
 - Do not print the full JSON.
 - Reply only with:
   - fragment file path
@@ -525,7 +525,7 @@ export const AHA_REVIEW_SIGNALS_PROMPT = String.raw({ raw: [`You are creating th
 Input:
 - Read the generated aha file provided by the orchestrator.
 - Write only this fragment file:
-  .aha/fragments/review-signals.json
+  $FRAGMENTS_DIR/review-signals.json
 
 Task:
 - Inspect the exact aha JSON file.
@@ -755,7 +755,7 @@ Style:
 - Avoid words like “safe”, “confidence”, “99%”, or percentages.
 
 Output:
-- Save only .aha/fragments/review-signals.json.
+- Save only $FRAGMENTS_DIR/review-signals.json.
 - Do not print the full JSON.
 - Reply only with:
   - fragment file path
@@ -870,11 +870,11 @@ Pass structure:
 Section index:
 - --- FRAGMENT MERGE CONTRACT ---
 - --- CODE CONTEXT PASS ---
-  Save only .aha/fragments/code-context.json.
+  Save only $FRAGMENTS_DIR/code-context.json.
 - --- REVIEW SIGNALS PASS ---
-  Save only .aha/fragments/review-signals.json.
+  Save only $FRAGMENTS_DIR/review-signals.json.
 - --- REVIEW JUDGMENT PASS ---
-  Save only .aha/fragments/review-judgment.json.
+  Save only $FRAGMENTS_DIR/review-judgment.json.
 
 Workflow:
 0. Default to the current working repository and the current branch PR.
@@ -885,19 +885,20 @@ Workflow:
    - Ask the user only if repo/PR inference fails, or if update mode has no aha path.
 1. Run the deterministic command for this mode. It sets \`PACK_PATH\`.
 2. Parse \`$PACK_PATH\`.
-3. If subagents are available, ask each pass in parallel. If not, run the passes sequentially yourself.
-4. Each pass writes exactly one fragment file:
+3. Set \`PACK_DIR="$(dirname "$PACK_PATH")"\`, \`FRAGMENTS_DIR="$PACK_DIR/fragments"\`, and \`FRAGMENT_LIST="$FRAGMENTS_DIR/code-context.json,$FRAGMENTS_DIR/review-signals.json,$FRAGMENTS_DIR/review-judgment.json"\`. Create \`$FRAGMENTS_DIR\`.
+4. If subagents are available, ask each pass in parallel. Give each subagent the matching pass prompt below 1:1 together with the exact \`PACK_PATH\` and \`FRAGMENTS_DIR\` values; do not summarize, rewrite, or shorten it. If subagents are not available, run the passes sequentially yourself.
+5. Each pass writes exactly one fragment file:
 ${AHA_FRAGMENT_PATHS.map((fragmentPath) => `   - ${fragmentPath}`).join("\n")}
-5. Merge fragments with:
-   "$AHA_CLI" merge --pack "$PACK_PATH" --fragments ${AHA_FRAGMENT_LIST}
-6. Run:
+6. Merge fragments with:
+   "$AHA_CLI" merge --pack "$PACK_PATH" --fragments "$FRAGMENT_LIST"
+7. Run:
    "$AHA_CLI" normalize --pack "$PACK_PATH"
-7. Parse the JSON again.
-8. If the user explicitly asks, you can start the viewer in a persistent terminal/session:
+8. Parse the JSON again.
+9. If the user explicitly asks, you can start the viewer in a persistent terminal/session:
    "$AHA_CLI" serve --pack "$PACK_PATH" --port 4173 --host 127.0.0.1
    - Keep this process running. In Codex-like tool environments, do not use \`nohup ... &\`; short-lived shell background processes may be cleaned up when the tool call exits.
    - If port 4173 is busy, use the URL printed by the server.
-9. Summarize:
+10. Summarize:
    - aha path
    - mode used
    - inline notes count
@@ -977,7 +978,12 @@ if [ -z "$TARGET_REPO" ]; then TARGET_REPO="$(pwd)"; fi
 if [ -z "$PR_NUMBER" ]; then PR_NUMBER="$(gh pr view --json number -q .number)"; fi
 cd "$TARGET_REPO"
 PACK_PATH="$("$AHA_CLI" generate --pr "$PR_NUMBER" | tail -n 1)"
+PACK_DIR="$(dirname "$PACK_PATH")"
+FRAGMENTS_DIR="$PACK_DIR/fragments"
+FRAGMENT_LIST="$FRAGMENTS_DIR/code-context.json,$FRAGMENTS_DIR/review-signals.json,$FRAGMENTS_DIR/review-judgment.json"
+mkdir -p "$FRAGMENTS_DIR"
 echo "$PACK_PATH"
+echo "$FRAGMENTS_DIR"
 
 Use \`$PACK_PATH\` for every later merge, normalize, and serve command.
 
@@ -1020,6 +1026,10 @@ if [ -z "$TARGET_REPO" ]; then TARGET_REPO="$(pwd)"; fi
 if [ -z "$PR_NUMBER" ]; then PR_NUMBER="$(gh pr view --json number -q .number)"; fi
 cd "$TARGET_REPO"
 "$AHA_CLI" update --pr "$PR_NUMBER" --pack "$PACK_PATH"
+PACK_DIR="$(dirname "$PACK_PATH")"
+FRAGMENTS_DIR="$PACK_DIR/fragments"
+FRAGMENT_LIST="$FRAGMENTS_DIR/code-context.json,$FRAGMENTS_DIR/review-signals.json,$FRAGMENTS_DIR/review-judgment.json"
+mkdir -p "$FRAGMENTS_DIR"
 
 Then open:
 - <aha basename>.update-report.json

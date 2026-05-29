@@ -18,6 +18,7 @@ const execFileAsync = promisify(execFile);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
+const packsRoot = path.resolve(root, process.env.AHA_PACKS_DIR || "packs");
 const cliCommand = shellQuote(resolveCliCommand());
 
 // CLI path embedded in prompts/onboarding. Defaults to this running bin, but a
@@ -166,6 +167,7 @@ try {
     openBrowser: command === "review",
     port: Number(readArg(args, "--port") || process.env.PORT || 4173),
     host: readArg(args, "--host") || "127.0.0.1",
+    empty: command === "start",
   });
 } catch (error) {
   console.error(error instanceof CliError ? error.message : error.stack || error.message);
@@ -177,12 +179,18 @@ async function generateFromPr({ prNumber, outPath, cwd }) {
 
   const outputPath = outPath
     ? path.resolve(cwd, outPath)
-    : path.join(cwd, ".aha", `aha-${slug(pack.branch || "branch")}-${pack.number}.json`);
+    : defaultPackPathFor(pack);
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, JSON.stringify(pack, null, 2) + "\n");
   JSON.parse(fs.readFileSync(outputPath, "utf8"));
   return outputPath;
+}
+
+function defaultPackPathFor(pack) {
+  const repo = slug(pack.repositoryName || pack.repoName || pack.repository?.name || "repo");
+  const pr = slug(pack.number || "pr");
+  return path.join(packsRoot, repo, pr, `aha-${slug(pack.branch || "branch")}-${pack.number}.json`);
 }
 
 function buildWorkflowPrompt(argv) {
@@ -2236,11 +2244,11 @@ function resolveAndValidatePack(packPath) {
   return resolvedPackPath;
 }
 
-async function servePack({ packPath, openBrowser, port, host }) {
+async function servePack({ packPath, openBrowser, port, host, empty = false }) {
   const server = await createServer({
     root,
     configFile: false,
-    plugins: [ahaJsonPlugin(packPath, { cliCommand }), react(), tailwindcss()],
+    plugins: [ahaJsonPlugin(packPath, { cliCommand, empty }), react(), tailwindcss()],
     server: {
       host,
       port,
@@ -2251,7 +2259,7 @@ async function servePack({ packPath, openBrowser, port, host }) {
   await server.listen();
 
   const info = server.resolvedUrls?.local?.[0] || `http://${host}:${port}/`;
-  console.log(packPath ? `aha serving ${packPath}` : "aha serving empty viewer");
+  console.log(empty ? "aha serving empty viewer" : packPath ? `aha serving ${packPath}` : `aha serving pack library ${packsRoot}`);
   console.log(info);
 
   if (openBrowser) {
@@ -2301,7 +2309,6 @@ function shellQuote(value) {
 }
 
 function ahaJsonPlugin(packFile, runtime = {}) {
-  const stateFile = packFile ? stateFileForPack(packFile) : null;
   return {
     name: "aha-json",
     configureServer(server) {
@@ -2312,22 +2319,56 @@ function ahaJsonPlugin(packFile, runtime = {}) {
           ahaCli: runtime.cliCommand || "aha",
         }, null, 2) + "\n");
       });
-      server.middlewares.use("/aha.json", (_req, res) => {
+      server.middlewares.use("/aha-packs.json", (req, res) => {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.setHeader("Cache-Control", "no-store");
-        if (!packFile) {
+        if (runtime.empty) {
+          res.end(JSON.stringify({ packs: [], selectedId: "" }, null, 2) + "\n");
+          return;
+        }
+        const index = packIndexForServing(packFile);
+        const selected = selectedPackEntry(req, index, packFile);
+        res.end(JSON.stringify({
+          packs: index,
+          selectedId: selected?.id || "",
+        }, null, 2) + "\n");
+      });
+      server.middlewares.use("/aha.json", (req, res) => {
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        if (runtime.empty) {
           res.end(JSON.stringify(emptyAha(), null, 2) + "\n");
           return;
         }
-        res.end(JSON.stringify(packForServing(packFile), null, 2) + "\n");
+        const index = packIndexForServing(packFile);
+        const selected = selectedPackEntry(req, index, packFile);
+        if (!selected) {
+          res.end(JSON.stringify(emptyAha(), null, 2) + "\n");
+          return;
+        }
+        res.end(JSON.stringify(packForServing(selected.path), null, 2) + "\n");
       });
       server.middlewares.use("/aha-state.json", async (req, res) => {
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.setHeader("Cache-Control", "no-store");
+        if (runtime.empty) {
+          if (req.method === "GET" || req.method === "HEAD") {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "No review state saved for empty viewer" }) + "\n");
+            return;
+          }
+          if (req.method === "PUT" || req.method === "DELETE") {
+            res.end(JSON.stringify({ ok: true, transient: true }) + "\n");
+            return;
+          }
+        }
+        const index = packIndexForServing(packFile);
+        const selected = selectedPackEntry(req, index, packFile);
+        const stateFile = selected ? stateFileForPack(selected.path) : null;
 
         try {
           if (req.method === "GET" || req.method === "HEAD") {
-            if (fs.existsSync(stateFile)) {
+            if (stateFile && fs.existsSync(stateFile)) {
               if (req.method === "HEAD") {
                 res.end();
                 return;
@@ -2356,7 +2397,7 @@ function ahaJsonPlugin(packFile, runtime = {}) {
           }
 
           if (req.method === "DELETE") {
-            if (fs.existsSync(stateFile)) fs.unlinkSync(stateFile);
+            if (stateFile && fs.existsSync(stateFile)) fs.unlinkSync(stateFile);
             res.end(JSON.stringify({ ok: true }) + "\n");
             return;
           }
@@ -2369,6 +2410,92 @@ function ahaJsonPlugin(packFile, runtime = {}) {
         }
       });
     },
+  };
+}
+
+function selectedPackEntry(req, index, packFile) {
+  const selectedId = packIdFromRequest(req);
+  if (selectedId) return index.find((entry) => entry.id === selectedId) || null;
+  if (packFile) return index.find((entry) => entry.path === packFile) || packEntryForFile(packFile);
+  return index[0] || null;
+}
+
+function packIdFromRequest(req) {
+  try {
+    const url = new URL(req.url || "", "http://127.0.0.1");
+    const value = url.searchParams.get("pack");
+    return typeof value === "string" ? value : "";
+  } catch {
+    return "";
+  }
+}
+
+function packIndexForServing(packFile) {
+  const entries = listPackEntries();
+  if (packFile && !entries.some((entry) => entry.path === packFile)) {
+    entries.unshift(packEntryForFile(packFile));
+  }
+  return entries;
+}
+
+function listPackEntries() {
+  const files = listJsonFiles(packsRoot).filter((file) => isServablePackFile(file));
+  return files
+    .map((file) => packEntryForFile(file))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function listJsonFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listJsonFiles(fullPath));
+    else if (entry.isFile() && entry.name.endsWith(".json")) out.push(fullPath);
+  }
+  return out;
+}
+
+function isServablePackFile(file) {
+  if (file.split(path.sep).includes("fragments")) return false;
+  const base = path.basename(file);
+  if (base.endsWith(".state.json") || base.endsWith(".update-report.json")) return false;
+  if (base.includes(".pre-") || base.includes(".ai-backup.") || base.includes(".generated-check.")) return false;
+  if (base.endsWith("-base.json")) return false;
+  try {
+    const pack = JSON.parse(fs.readFileSync(file, "utf8"));
+    return Array.isArray(pack.files);
+  } catch {
+    return false;
+  }
+}
+
+function packEntryForFile(file) {
+  const resolved = path.resolve(file);
+  let pack = {};
+  try {
+    pack = JSON.parse(fs.readFileSync(resolved, "utf8"));
+  } catch {
+    // Keep a broken entry out of normal indexes; explicit --pack validation
+    // already catches parse errors before the server starts.
+  }
+  const rel = path.relative(packsRoot, resolved);
+  const parts = rel && !rel.startsWith("..") ? rel.split(path.sep) : [];
+  const stat = fs.statSync(resolved);
+  const repo = pack.repositoryName || pack.repoName || pack.repository?.name || parts[0] || repositoryNameFromPackPath(resolved);
+  const pr = pack.number || parts[1] || "";
+  const id = parts.length ? parts.join("/") : `external/${hashString(resolved)}/${path.basename(resolved)}`;
+  return {
+    id,
+    path: resolved,
+    repo,
+    pr,
+    title: pack.title || path.basename(resolved),
+    branch: pack.branch || "",
+    base: pack.base || "",
+    kind: path.basename(resolved).startsWith("reviewpack-") ? "reviewpack" : "aha",
+    updatedAt: stat.mtime.toISOString(),
+    filesChanged: Array.isArray(pack.files) ? pack.files.length : 0,
   };
 }
 
@@ -2392,8 +2519,14 @@ async function repositoryNameForCwd(cwd) {
 
 function repositoryNameFromPackPath(packFile) {
   const parts = path.resolve(packFile).split(path.sep);
+  const packsParts = packsRoot.split(path.sep);
+  if (parts.slice(0, packsParts.length).join(path.sep) === packsParts.join(path.sep)) {
+    return parts[packsParts.length] || path.basename(path.dirname(packFile));
+  }
   const ahaIndex = parts.lastIndexOf(".aha");
   if (ahaIndex > 0) return parts[ahaIndex - 1];
+  const reviewpackIndex = parts.lastIndexOf(".reviewpack");
+  if (reviewpackIndex > 0) return parts[reviewpackIndex - 1];
   return path.basename(path.dirname(packFile));
 }
 
@@ -2505,5 +2638,7 @@ function printHelp() {
   aha merge --pack ./aha.json --fragments ./code-context.json,./review-signals.json,./review-judgment.json [--out ./aha.json]
   aha prompt --mode init --pr <number> --repo /path/to/repo
   aha prompt --mode update --pr <number> --repo /path/to/repo --pack ./aha.json
-  aha review --pr <number> [--out ./aha.json] [--port 4173]`);
+  aha review --pr <number> [--out ./aha.json] [--port 4173]
+
+Without --pack, aha serve opens the central packs/<repo>/<pr>/ library with an in-app pack picker.`);
 }

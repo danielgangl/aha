@@ -46,7 +46,7 @@ node bin/aha.mjs prompt --mode init --repo /path/to/target-repo --pr 123
 For an already enriched pack that needs to follow the latest PR state:
 
 ```sh
-node bin/aha.mjs prompt --mode update --repo /path/to/target-repo --pr 123 --pack /path/to/target-repo/.aha/aha-foo-123.json
+node bin/aha.mjs prompt --mode update --repo /path/to/target-repo --pr 123 --pack /path/to/aha/packs/repo/123/aha-foo-123.json
 ```
 
 The prompt tells you when to run `generate`, `update`, `merge`, and `normalize`, when to use subagents, and which fragment files each pass writes. Do not let parallel agents write the same JSON file.
@@ -56,12 +56,13 @@ The prompt tells you when to run `generate`, `update`, `merge`, and `normalize`,
 ```sh
 npm install
 npm test
-npm run serve -- --pack sample/aha.json
+npm run serve
 ```
 
 After installing or linking the package bin, the direct command is:
 
 ```sh
+aha serve
 aha serve --pack ./aha.json
 aha start
 aha review --pack ./aha.json
@@ -70,7 +71,7 @@ aha review --pr 123
 aha prompt --mode init --pr 123 --repo /path/to/repo
 ```
 
-`aha start` launches the viewer with an empty in-memory pack. It is mainly useful as an onboarding screen with copyable commands and prompts.
+`aha serve` launches one local viewer for the central `packs/<repo>/<pr>/` library. Use the picker in the top-left header to switch between packs instead of running several ports. `aha serve --pack ./aha.json` still opens one explicit pack. `aha start` launches the empty onboarding screen with copyable commands and prompts.
 
 `generate --pr` must be run inside the target git repository. It uses read-only GitHub CLI commands:
 
@@ -79,7 +80,7 @@ gh pr view 123 --json number,title,headRefName,baseRefName,author,url,additions,
 gh pr diff 123
 ```
 
-Without `--out`, generated packs are written under `.aha/` in the target repo. Passing `--out` explicitly chooses another output path.
+Without `--out`, generated packs are written centrally under `packs/<repo>/<pr>/` in this aha checkout. Passing `--out` explicitly chooses another output path.
 
 Generated packs include best-effort local TS/JS symbol matching when `rg` is available. Function/class/const names found in the diff become clickable, and the right rail shows local callsites from the checked-out repo with `touched`, `untouched`, or `test` status. This is deterministic local search, not AI or full program analysis.
 
