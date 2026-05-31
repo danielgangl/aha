@@ -30,7 +30,7 @@ function StepRail({
   downDone?: boolean;
 }) {
   const lineBase =
-    "flex-auto w-px min-h-[10px] transition-[background] duration-[0.4s] ease-[ease]";
+    "flex-auto w-px min-h-2.5 transition-[background] duration-[0.4s] ease-[ease]";
 
   // .onb-step-num + state variants
   const numBase =
@@ -66,7 +66,7 @@ function StepRail({
         <span
           aria-hidden="true"
           className={
-            "absolute left-1/2 top-1/2 w-[11px] h-[6px] border-l-2 border-b-2 border-current rounded-bl-[1px] " +
+            "absolute left-1/2 top-1/2 w-[11px] h-1.5 border-l-2 border-b-2 border-current rounded-bl-[1px] " +
             "[transition:opacity_.2s_ease,transform_.32s_cubic-bezier(.2,.9,.25,1.45)] " +
             (state === "done"
               ? "opacity-100 [transform:translate(-50%,-62%)_rotate(-45deg)_scale(1)]"
@@ -161,7 +161,7 @@ export function EmptyOnboarding({ runtime = DEFAULT_RUNTIME }: { runtime?: Runti
           }
           aria-label="Setup steps"
         >
-          <li className="grid grid-cols-[32px_minmax(0,1fr)] gap-[14px] items-stretch" data-state={stepState(1)}>
+          <li className="grid grid-cols-[32px_minmax(0,1fr)] gap-3.5 items-stretch" data-state={stepState(1)}>
             <StepRail state={stepState(1)} num={1} hideUp downDone={done} />
             <OnboardingPromptAction
               prompt={fullWorkflowPrompt}
@@ -169,11 +169,11 @@ export function EmptyOnboarding({ runtime = DEFAULT_RUNTIME }: { runtime?: Runti
               onCopied={() => setDone(true)}
             />
           </li>
-          <li className="grid grid-cols-[32px_minmax(0,1fr)] gap-[14px] items-stretch" data-state={stepState(2)}>
+          <li className="grid grid-cols-[32px_minmax(0,1fr)] gap-3.5 items-stretch" data-state={stepState(2)}>
             <StepRail state={stepState(2)} num={2} upDone={done} />
             <StepInfo label="Paste it into your coding agent" hint="Give it the target repo path and PR" />
           </li>
-          <li className="grid grid-cols-[32px_minmax(0,1fr)] gap-[14px] items-stretch" data-state={stepState(3)}>
+          <li className="grid grid-cols-[32px_minmax(0,1fr)] gap-3.5 items-stretch" data-state={stepState(3)}>
             <StepRail state={stepState(3)} num={3} hideDown />
             <StepInfo label="Your review opens right here" hint="It generates, enriches, and loads it for you" />
           </li>
@@ -187,7 +187,7 @@ export function EmptyOnboarding({ runtime = DEFAULT_RUNTIME }: { runtime?: Runti
           <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer select-none px-2.5 py-[7px] rounded-[9px] text-[12.5px] text-ink-4 transition-[color,background] duration-[0.14s] ease-[ease] hover:text-ink-2 hover:bg-[color-mix(in_oklab,var(--color-bg-3)_60%,transparent)] after:content-['›'] after:ml-1.5 after:font-mono after:inline-block after:transition-transform after:duration-[0.16s] after:ease-[ease] group-open/manual:after:rotate-90">
             Rather run the steps yourself?
           </summary>
-          <div className="mt-[14px] grid gap-2.5 text-left [animation:onb-rise_.32s_ease_both] motion-reduce:animate-none">
+          <div className="mt-3.5 grid gap-2.5 text-left [animation:onb-rise_.32s_ease_both] motion-reduce:animate-none">
             <WorkflowCopyBlock title="Open an existing pack" text={openExistingCommand} blockClassName="bg-surface" />
             <WorkflowCopyBlock title="Generate the deterministic base" text={generateCommand} blockClassName="bg-surface" />
             <WorkflowCopyBlock title="Generate and serve in this terminal" text={generateAndServeCommand} blockClassName="bg-surface" />
@@ -254,7 +254,7 @@ export function OnboardingPromptAction({
           {active && !copied && (
             <span
               aria-hidden="true"
-              className="flex-none w-1.5 h-1.5 border-t-[1.5px] border-r-[1.5px] border-blue rounded-tr-[2px] [transform:translateX(-3px)_rotate(45deg)] [animation:onb-arrow-wander_1.4s_cubic-bezier(.45,0,.55,1)_infinite] pointer-events-none motion-reduce:animate-none motion-reduce:opacity-70 motion-reduce:[transform:rotate(45deg)]"
+              className="flex-none w-1.5 h-1.5 border-t-[1.5px] border-r-[1.5px] border-blue rounded-tr-xs [transform:translateX(-3px)_rotate(45deg)] [animation:onb-arrow-wander_1.4s_cubic-bezier(.45,0,.55,1)_infinite] pointer-events-none motion-reduce:animate-none motion-reduce:opacity-70 motion-reduce:[transform:rotate(45deg)]"
             />
           )}
           <span className="leading-none">{copied ? "Copied" : "Copy"}</span>

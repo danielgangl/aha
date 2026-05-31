@@ -53,10 +53,10 @@ export function Dashboard({
   return (
     <main className="h-full overflow-y-auto px-6 pt-14 pb-[72px] text-ink bg-[radial-gradient(112%_70%_at_50%_-8%,color-mix(in_oklab,var(--color-blue-soft)_58%,transparent),transparent_62%),var(--color-paper)]">
       <div className="mx-auto w-[min(760px,100%)]">
-        <div className="flex items-center gap-[10px] mb-[6px]">
+        <div className="flex items-center gap-2.5 mb-1.5">
           <span
             aria-hidden="true"
-            className="w-9 h-9 grid place-items-center rounded-[12px] bg-surface border border-line-2 text-ink text-[17px] leading-none shadow-[0_1px_0_color-mix(in_oklab,var(--color-surface)_60%,#fff),0_14px_30px_-22px_color-mix(in_oklab,var(--color-blue)_60%,transparent)]"
+            className="w-9 h-9 grid place-items-center rounded-xl bg-surface border border-line-2 text-ink text-[17px] leading-none shadow-[0_1px_0_color-mix(in_oklab,var(--color-surface)_60%,#fff),0_14px_30px_-22px_color-mix(in_oklab,var(--color-blue)_60%,transparent)]"
           >
             ◇
           </span>
@@ -72,7 +72,7 @@ export function Dashboard({
 
         <NewFromPr onOpenPack={onOpenPack} />
 
-        <ul className="list-none p-0 mt-[18px] grid gap-[10px]">
+        <ul className="list-none p-0 mt-[18px] grid gap-2.5">
           {packs.map((pack) => (
             <li key={pack.id}>
               <PackCard pack={pack} onOpen={() => onOpenPack(pack.id)} onDelete={() => deletePack(pack.id)} />
@@ -98,8 +98,8 @@ function CardMetric({ label, value, total, accent = 0 }: { label: string; value:
           {accent > 0 && <span className="text-rose-ink"> · {accent}!</span>}
         </span>
       </div>
-      <span className="block h-1 bg-bg-3 rounded-[2px] overflow-hidden">
-        <span className={`block h-full rounded-[2px] ${done ? "bg-pine" : "bg-ink"}`} style={{ width: `${pct}%` }} />
+      <span className="block h-1 bg-bg-3 rounded-xs overflow-hidden">
+        <span className={`block h-full rounded-xs ${done ? "bg-pine" : "bg-ink"}`} style={{ width: `${pct}%` }} />
       </span>
     </div>
   );
@@ -135,9 +135,9 @@ function PackCard({ pack, onOpen, onDelete }: { pack: PackIndexEntry; onOpen: ()
       <button
         type="button"
         onClick={onOpen}
-        className="w-full text-left grid gap-[9px] px-[15px] py-[13px] rounded-[12px] border border-line-2 bg-surface cursor-pointer shadow-[inset_0_1px_0_color-mix(in_oklab,#fff_45%,transparent)] transition-[border-color,box-shadow,transform] duration-200 ease-[ease] hover:border-line-3 hover:-translate-y-px hover:shadow-[0_14px_28px_-22px_color-mix(in_oklab,var(--color-ink)_80%,transparent)] active:translate-y-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue focus-visible:outline-offset-2"
+        className="w-full text-left grid gap-[9px] px-[15px] py-[13px] rounded-xl border border-line-2 bg-surface cursor-pointer shadow-[inset_0_1px_0_color-mix(in_oklab,#fff_45%,transparent)] transition-[border-color,box-shadow,transform] duration-200 ease-[ease] hover:border-line-3 hover:-translate-y-px hover:shadow-[0_14px_28px_-22px_color-mix(in_oklab,var(--color-ink)_80%,transparent)] active:translate-y-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue focus-visible:outline-offset-2"
       >
-        <div className="flex items-center justify-between gap-[12px]">
+        <div className="flex items-center justify-between gap-3">
           <span className="font-mono text-[11.5px] text-ink-2 truncate">
             {pack.repo} <span className="text-ink-4">#{pack.pr}</span>
           </span>
@@ -152,7 +152,7 @@ function PackCard({ pack, onOpen, onDelete }: { pack: PackIndexEntry; onOpen: ()
 
         {(pack.branch || pack.base) && (
           <div className="text-[11px]">
-            <span className="inline-block max-w-full truncate font-mono text-[10.5px] text-ink-2 bg-bg-3 border border-line rounded-[5px] px-[6px] py-[1px]">
+            <span className="inline-block max-w-full truncate font-mono text-[10.5px] text-ink-2 bg-bg-3 border border-line rounded-[5px] px-1.5 py-px">
               {pack.branch}{pack.base ? ` → ${pack.base}` : ""}
             </span>
           </div>
@@ -160,7 +160,7 @@ function PackCard({ pack, onOpen, onDelete }: { pack: PackIndexEntry; onOpen: ()
 
         {(focusTotal > 0 || total > 0) &&
           (focusTotal > 0 ? (
-            <div className="grid grid-cols-2 gap-[14px]">
+            <div className="grid grid-cols-2 gap-3.5">
               <CardMetric label="Decisions" value={focusDecided} total={focusTotal} accent={focusAccent} />
               <CardMetric label="Files" value={reviewed} total={total} />
             </div>
@@ -170,7 +170,7 @@ function PackCard({ pack, onOpen, onDelete }: { pack: PackIndexEntry; onOpen: ()
       </button>
 
       {/* Delete control — top-right, revealed on hover; two-step confirm. */}
-      <div className="absolute top-[10px] right-[12px] flex items-center gap-[6px]" onClick={(event) => event.stopPropagation()}>
+      <div className="absolute top-2.5 right-3 flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
         {error ? (
           <span className="font-mono text-[10px] leading-[1.3] text-rose-ink max-w-[200px] truncate" title={error}>
             {error}
@@ -181,7 +181,7 @@ function PackCard({ pack, onOpen, onDelete }: { pack: PackIndexEntry; onOpen: ()
               type="button"
               onClick={confirmDelete}
               disabled={busy}
-              className="h-[22px] px-[8px] rounded-[6px] border border-[var(--rose-ink)] bg-rose-soft text-[11px] font-medium text-rose-ink cursor-pointer hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="h-[22px] px-2 rounded-md border border-[var(--rose-ink)] bg-rose-soft text-[11px] font-medium text-rose-ink cursor-pointer hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {busy ? "Deleting…" : "Delete"}
             </button>
@@ -189,7 +189,7 @@ function PackCard({ pack, onOpen, onDelete }: { pack: PackIndexEntry; onOpen: ()
               type="button"
               onClick={(event) => { event.stopPropagation(); setConfirming(false); }}
               disabled={busy}
-              className="h-[22px] px-[8px] rounded-[6px] border border-line-2 bg-surface text-[11px] text-ink-3 cursor-pointer hover:text-ink hover:border-line-3 disabled:opacity-60"
+              className="h-[22px] px-2 rounded-md border border-line-2 bg-surface text-[11px] text-ink-3 cursor-pointer hover:text-ink hover:border-line-3 disabled:opacity-60"
             >
               Cancel
             </button>
@@ -200,7 +200,7 @@ function PackCard({ pack, onOpen, onDelete }: { pack: PackIndexEntry; onOpen: ()
             aria-label="Delete pack"
             title="Delete pack"
             onClick={(event) => { event.stopPropagation(); setConfirming(true); }}
-            className="opacity-0 group-hover/card:opacity-100 focus:opacity-100 transition-opacity h-[22px] px-[8px] rounded-[6px] border border-line-2 bg-surface text-[11px] text-ink-3 cursor-pointer hover:border-[var(--rose-ink)] hover:text-rose-ink focus-visible:outline-2 focus-visible:outline-blue focus-visible:outline-offset-1"
+            className="opacity-0 group-hover/card:opacity-100 focus:opacity-100 transition-opacity h-[22px] px-2 rounded-md border border-line-2 bg-surface text-[11px] text-ink-3 cursor-pointer hover:border-[var(--rose-ink)] hover:text-rose-ink focus-visible:outline-2 focus-visible:outline-blue focus-visible:outline-offset-1"
           >
             Delete
           </button>
@@ -266,7 +266,7 @@ function NewFromPr({ onOpenPack }: { onOpenPack: (id: string) => void }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-[7px] h-[28px] px-[11px] rounded-[8px] border border-line-2 bg-surface text-[12px] text-ink-2 cursor-pointer transition-colors hover:border-line-3 hover:bg-bg-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-blue focus-visible:outline-offset-2"
+        className="inline-flex items-center gap-[7px] h-7 px-[11px] rounded-lg border border-line-2 bg-surface text-[12px] text-ink-2 cursor-pointer transition-colors hover:border-line-3 hover:bg-bg-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-blue focus-visible:outline-offset-2"
       >
         <span aria-hidden="true" className="font-mono text-[13px] leading-none text-ink-3">+</span>
         New from PR
@@ -275,8 +275,8 @@ function NewFromPr({ onOpenPack }: { onOpenPack: (id: string) => void }) {
   }
 
   return (
-    <section className="rounded-[12px] border border-line-2 bg-bg-2 p-[14px] shadow-[inset_0_1px_0_color-mix(in_oklab,#fff_45%,transparent)]">
-      <div className="flex items-center justify-between mb-[10px]">
+    <section className="rounded-xl border border-line-2 bg-bg-2 p-3.5 shadow-[inset_0_1px_0_color-mix(in_oklab,#fff_45%,transparent)]">
+      <div className="flex items-center justify-between mb-2.5">
         <span className="text-[12.5px] font-semibold text-ink">Initialize a review from a PR</span>
         <button
           type="button"
@@ -290,25 +290,25 @@ function NewFromPr({ onOpenPack }: { onOpenPack: (id: string) => void }) {
 
       {repos !== null && repos.length === 0 ? (
         <div className="text-[12px] leading-[1.5] text-ink-3">
-          <p className="m-0 mb-[8px]">
+          <p className="m-0 mb-2">
             Register a repo to initialize from here. Add it to{" "}
-            <code className="font-mono text-[11px] text-ink-2 bg-bg-3 border border-line rounded-[4px] px-[4px] py-px">.aha.local.json</code>:
+            <code className="font-mono text-[11px] text-ink-2 bg-bg-3 border border-line rounded-sm px-1 py-px">.aha.local.json</code>:
           </p>
-          <pre className="m-0 font-mono text-[11px] leading-[1.5] text-ink-2 bg-surface border border-line rounded-[8px] p-[10px] overflow-x-auto">{`{
+          <pre className="m-0 font-mono text-[11px] leading-[1.5] text-ink-2 bg-surface border border-line rounded-lg p-2.5 overflow-x-auto">{`{
   "repos": [
     { "name": "my-repo", "path": "/absolute/path/to/my-repo" }
   ]
 }`}</pre>
         </div>
       ) : (
-        <div className="flex flex-wrap items-end gap-[10px]">
-          <label className="grid gap-[4px] min-w-[160px] flex-1">
+        <div className="flex flex-wrap items-end gap-2.5">
+          <label className="grid gap-1 min-w-[160px] flex-1">
             <span className="text-[10.5px] font-semibold tracking-[0.04em] uppercase text-ink-3">Repo</span>
             <select
               value={repo}
               disabled={busy || repos === null}
               onChange={(event) => setRepo(event.target.value)}
-              className="h-[30px] rounded-[7px] border border-line-2 bg-surface px-[8px] font-mono text-[12px] text-ink outline-none focus:border-blue disabled:opacity-50"
+              className="h-[30px] rounded-[7px] border border-line-2 bg-surface px-2 font-mono text-[12px] text-ink outline-none focus:border-blue disabled:opacity-50"
             >
               {repos === null && <option value="">Loading…</option>}
               {repos?.map((name) => (
@@ -316,7 +316,7 @@ function NewFromPr({ onOpenPack }: { onOpenPack: (id: string) => void }) {
               ))}
             </select>
           </label>
-          <label className="grid gap-[4px] w-[110px]">
+          <label className="grid gap-1 w-[110px]">
             <span className="text-[10.5px] font-semibold tracking-[0.04em] uppercase text-ink-3">PR #</span>
             <input
               value={pr}
@@ -325,7 +325,7 @@ function NewFromPr({ onOpenPack }: { onOpenPack: (id: string) => void }) {
               placeholder="123"
               onChange={(event) => setPr(event.target.value.replace(/[^0-9]/g, ""))}
               onKeyDown={(event) => { if (event.key === "Enter") submit(); }}
-              className="h-[30px] rounded-[7px] border border-line-2 bg-surface px-[8px] font-mono text-[12px] text-ink outline-none focus:border-blue placeholder:text-ink-4 disabled:opacity-50"
+              className="h-[30px] rounded-[7px] border border-line-2 bg-surface px-2 font-mono text-[12px] text-ink outline-none focus:border-blue placeholder:text-ink-4 disabled:opacity-50"
             />
           </label>
           <button
@@ -340,9 +340,9 @@ function NewFromPr({ onOpenPack }: { onOpenPack: (id: string) => void }) {
       )}
 
       {error && (
-        <p className="mt-[10px] mb-0 text-[11.5px] leading-[1.45] text-rose-ink">{error}</p>
+        <p className="mt-2.5 mb-0 text-[11.5px] leading-[1.45] text-rose-ink">{error}</p>
       )}
-      <p className="mt-[10px] mb-0 font-mono text-[10.5px] leading-[1.4] text-ink-4">
+      <p className="mt-2.5 mb-0 font-mono text-[10.5px] leading-[1.4] text-ink-4">
         Builds the deterministic pack via <span className="text-ink-3">gh pr diff</span>. AI enrichment comes later.
       </p>
     </section>

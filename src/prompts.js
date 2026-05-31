@@ -100,8 +100,9 @@ The fragment may contain these fields only:
    Summarize what is NEW in the diff since that prior view — not the full PR delta (file.note covers that).
    Keep it short: one paragraph or 2–3 bullets max.
    German, same tone as file.note.
+   Do not prefix it with a "seit deinem letzten Blick" / "since last viewed" phrase — the viewer already labels this block. Start straight with the delta.
    Good:
-   - "<p>Neu seit deinem letzten Blick: <code>frontPlacement</code> wird an <code>CapacityTicketFace</code> durchgereicht — Layout-Messphase vs. gestapelte Karte.</p>"
+   - "<p><code>frontPlacement</code> wird an <code>CapacityTicketFace</code> durchgereicht — Layout-Messphase vs. gestapelte Karte.</p>"
    - "<ul><li>Forest-Palette: hardcodierte Grüntöne → <code>forest-*</code>-Utilities.</li><li>Kein Verhaltensdelta.</li></ul>"
    Bad:
    - Repeating the entire file.note verbatim.
