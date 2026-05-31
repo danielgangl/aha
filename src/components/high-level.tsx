@@ -18,6 +18,7 @@ import type {
 import { categoryLabel, hasOverviewContent } from "../lib/pack";
 import { AsciiPanel, InlineText, RefList, RichText } from "./rich";
 import { CopyContextButton, DecisionCard, EvidenceRow, LensPill, ResolveZone, SectionBlock } from "../decisions.js";
+import { StatusPill, TriageButtons } from "./triage";
 import type { FocusItem } from "../lib/review-focus";
 import { buildReviewFocus, focusItemContext } from "../lib/review-focus";
 
@@ -538,7 +539,7 @@ export function CompactReviewCard({
           {category && <CatPill>{category}</CatPill>}
           {risk && <OverviewRiskPill risk={risk} />}
           {number && <OverviewNum>{number}</OverviewNum>}
-          {status && <DecisionStatusPill status={status} />}
+          {status && <StatusPill status={status} />}
         </div>
         {/* .overview-action-title */}
         <h3 className="m-0 font-sans text-[13.5px] leading-[1.35] font-semibold text-ink [text-wrap:pretty]">{title}</h3>
@@ -546,7 +547,7 @@ export function CompactReviewCard({
       {/* .overview-action-controls */}
       <div className="self-center flex items-center gap-2">
         {copyContext && <CopyContextButton text={copyContext} />}
-        <DecisionTriage status={status} onSetStatus={onSetStatus} />
+        <TriageButtons status={status} onSetStatus={onSetStatus} />
       </div>
     </article>
   );
@@ -644,7 +645,7 @@ function FocusCard({
       {topBanner}
       <header className="flex items-center gap-[6px] flex-wrap mb-[6px]">
         <LensPill lens={lens} />
-        {status && <DecisionStatusPill status={status} />}
+        {status && <StatusPill status={status} />}
       </header>
       <h3 className="font-sans font-semibold text-base leading-[1.3] tracking-[-0.008em] text-ink mt-[6px] mb-2 [text-wrap:pretty]">
         {title}
@@ -705,52 +706,3 @@ export function OverviewRiskPill({ risk }: { risk: string }) {
   );
 }
 
-export function DecisionStatusPill({ status }: { status: TriageStatus }) {
-  // .dc-status-pill.st-{status}
-  const tone =
-    status === "accept"
-      ? "bg-pine-soft text-pine-ink"
-      : status === "flag"
-      ? "bg-amber-soft text-amber-ink"
-      : "bg-rose-soft text-rose-ink";
-  return (
-    <span
-      className={`inline-flex items-center h-5 px-2 rounded-[4px] font-mono text-[10px] font-semibold tracking-[0.03em] ${tone}`}
-    >
-      {status === "accept" && "✓ Accepted"}
-      {status === "flag" && "? Flagged for discussion"}
-      {status === "block" && "✗ Blocker"}
-    </span>
-  );
-}
-
-export function DecisionTriage({ status, onSetStatus }: { status: TriageStatus | undefined; onSetStatus: SetStatusHandler }) {
-  // .dc-triage + .dc-tri (shared with decisions.tsx TriageButtons)
-  const base =
-    "appearance-none w-[26px] h-[26px] border border-line-2 bg-surface rounded-[6px] text-ink-3 text-[13px] font-semibold cursor-pointer inline-flex items-center justify-center font-mono hover:bg-bg-3 hover:text-ink";
-  return (
-    <div className="flex gap-1">
-      <button
-        className={`${base} ${status === "accept" ? "bg-pine! text-white! border-pine!" : ""}`}
-        onClick={() => onSetStatus(status === "accept" ? null : "accept")}
-        title="Accept"
-      >
-        ✓
-      </button>
-      <button
-        className={`${base} ${status === "flag" ? "bg-amber! text-ink! border-amber!" : ""}`}
-        onClick={() => onSetStatus(status === "flag" ? null : "flag")}
-        title="Flag for discussion"
-      >
-        ?
-      </button>
-      <button
-        className={`${base} ${status === "block" ? "bg-rose! text-white! border-rose!" : ""}`}
-        onClick={() => onSetStatus(status === "block" ? null : "block")}
-        title="Mark as blocker"
-      >
-        ✗
-      </button>
-    </div>
-  );
-}

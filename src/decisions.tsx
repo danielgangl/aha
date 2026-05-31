@@ -15,6 +15,7 @@ import type {
 } from "./types";
 import { DiffExcerpt } from "./components/diff";
 import { InlineText } from "./components/rich";
+import { StatusPill, TriageButtons } from "./components/triage";
 
 // v2/decisions.jsx — Decisions Mode.
 // Decision Cards stacked vertically. Each card states a decision/claim,
@@ -33,10 +34,6 @@ const RISK_LABEL: Record<string, string> = { high: "High risk", med: "Med risk",
 // .cat-pill
 const CAT_PILL_CLASS =
   "inline-flex items-center h-5 px-2 rounded-[4px] bg-bg-3 text-ink-2 font-mono text-[10px] font-medium tracking-[0.03em] uppercase";
-
-// .dc-status-pill (base, before .st-* color)
-const STATUS_PILL_BASE =
-  "inline-flex items-center h-5 px-2 rounded-[4px] font-mono text-[10px] font-semibold tracking-[0.03em]";
 
 function CategoryPillBox({ children }: { children: React.ReactNode }) {
   return <span className={CAT_PILL_CLASS}>{children}</span>;
@@ -62,66 +59,9 @@ function RiskPill({ risk }: { risk?: string }) {
   );
 }
 
-function StatusPill({ status }: { status: TriageStatus }) {
-  // .dc-status-pill.st-{status}
-  const tone =
-    status === "accept"
-      ? "bg-pine-soft text-pine-ink"
-      : status === "flag"
-      ? "bg-amber-soft text-amber-ink"
-      : "bg-rose-soft text-rose-ink";
-  return (
-    <span className={`${STATUS_PILL_BASE} ${tone}`}>
-      {status === "accept" && "✓ Accepted"}
-      {status === "flag" && "? Flagged for discussion"}
-      {status === "block" && "✗ Blocker"}
-    </span>
-  );
-}
-
 function CategoryPill({ category, categories }: { category?: string; categories: DecisionCategory[] }) {
   const c = categories.find((c) => c.key === category);
   return <CategoryPillBox>{c?.label || category}</CategoryPillBox>;
-}
-
-// .dc-triage + .dc-tri (the three triage toggle buttons, shared visual)
-function TriageButtons({
-  status,
-  onSetStatus,
-  acceptTitle = "Accept this decision",
-}: {
-  status: Status;
-  onSetStatus: (status: TriageStatus | null) => void;
-  acceptTitle?: string;
-}) {
-  // .dc-tri base
-  const base =
-    "appearance-none w-[26px] h-[26px] border border-line-2 bg-surface rounded-[6px] text-ink-3 text-[13px] font-semibold cursor-pointer inline-flex items-center justify-center font-mono hover:bg-bg-3 hover:text-ink";
-  return (
-    <div className="flex gap-1">
-      <button
-        className={`${base} ${status === "accept" ? "bg-pine! text-white! border-pine!" : ""}`}
-        onClick={() => onSetStatus(status === "accept" ? null : "accept")}
-        title={acceptTitle}
-      >
-        ✓
-      </button>
-      <button
-        className={`${base} ${status === "flag" ? "bg-amber! text-ink! border-amber!" : ""}`}
-        onClick={() => onSetStatus(status === "flag" ? null : "flag")}
-        title="Flag for discussion"
-      >
-        ?
-      </button>
-      <button
-        className={`${base} ${status === "block" ? "bg-rose! text-white! border-rose!" : ""}`}
-        onClick={() => onSetStatus(status === "block" ? null : "block")}
-        title="Mark as blocker"
-      >
-        ✗
-      </button>
-    </div>
-  );
 }
 
 // .dc-head — shared card header shell (tags left, triage right)

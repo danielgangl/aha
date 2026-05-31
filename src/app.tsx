@@ -42,6 +42,7 @@ import {
 } from "./lib/pack";
 import { plainDiffContent } from "./lib/diff";
 import { focusItemSnapshot, indexFocusItems } from "./lib/review-focus";
+import { idSlug, overviewItemId, stemOfPath, topicSlug } from "./lib/focus-id.js";
 import { CallSitesPanel } from "./components/call-sites";
 import { FileDiffPanel } from "./components/file-panel";
 import { FileCard } from "./components/file-card";
@@ -1107,7 +1108,7 @@ function normalizeOverview(overview: any, canonicalFileId: IdentityFileId = iden
     systemMap: normalizeSystemMap(overview.systemMap, canonicalFileId),
     modelDeltas: Array.isArray(overview.modelDeltas)
       ? overview.modelDeltas.map((item: any) => ({
-        id: normalizeOverviewItemId(item, "model-delta", usedIds),
+        id: overviewItemId(item, "model-delta", usedIds),
         title: normalizeRichText(item?.title, canonicalFileId),
         before: normalizeRichText(item?.before, canonicalFileId),
         after: normalizeRichText(item?.after, canonicalFileId),
@@ -1125,7 +1126,7 @@ function normalizeOverview(overview: any, canonicalFileId: IdentityFileId = iden
       : [],
     assumptions: Array.isArray(overview.assumptions)
       ? overview.assumptions.map((item: any) => ({
-        id: normalizeOverviewItemId(item, "assumption", usedIds),
+        id: overviewItemId(item, "assumption", usedIds),
         text: normalizeRichText(item?.text, canonicalFileId),
         refs: normalizeRefs(item?.refs, canonicalFileId),
         evidence: normalizeFocusEvidence(item?.evidence, canonicalFileId),
@@ -1134,7 +1135,7 @@ function normalizeOverview(overview: any, canonicalFileId: IdentityFileId = iden
       : [],
     hotspots: Array.isArray(overview.hotspots)
       ? overview.hotspots.map((item: any) => ({
-        id: normalizeOverviewItemId(item, "hotspot", usedIds),
+        id: overviewItemId(item, "hotspot", usedIds),
         title: normalizeRichText(item?.title, canonicalFileId),
         why: normalizeRichText(item?.why, canonicalFileId),
         refs: normalizeRefs(item?.refs, canonicalFileId),
@@ -1155,56 +1156,6 @@ function normalizeSystemMap(systemMap: any, canonicalFileId: IdentityFileId = id
   return { title, kind, lines, refs };
 }
 
-// Stable, content-anchored id (mirrors bin/aha.mjs overviewItemId). Author id
-// wins; otherwise anchor on the primary evidence file + a short topic slug so the
-// id tracks the concern, not its list position. Keeps triage state from sticking
-// to a slot across regenerations. The CLI normalize bakes this id into the pack,
-// so this client path is a parity fallback for un-normalized data.
-function normalizeOverviewItemId(item: any, kind: string, used: Set<string>): string {
-  const author = typeof item?.id === "string" && item.id.trim() ? item.id.trim() : "";
-  const base = author || contentAnchoredOverviewId(item, kind);
-  let id = base;
-  let n = 2;
-  while (used.has(id)) {
-    id = `${base}-${n}`;
-    n += 1;
-  }
-  used.add(id);
-  return id;
-}
-
-function contentAnchoredOverviewId(item: any, kind: string): string {
-  const evidence = Array.isArray(item?.evidence) ? item.evidence : [];
-  const anchor = evidence.find((entry: any) => entry && (entry.path || entry.fileId));
-  const fileStem = anchor ? idSlug(stemOfPath(anchor.path || anchor.fileId)) : "";
-  const topic = topicSlug(item?.title != null ? item.title : item?.text);
-  const parts = [kind, fileStem, topic].filter(Boolean);
-  return parts.length > 1 ? parts.join("-") : `${kind}-item`;
-}
-
-function rawRichToText(value: any): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value.map((part: any) => (typeof part === "string" ? part : (part && (part.label || part.id)) || "")).join(" ");
-  }
-  return "";
-}
-
-function topicSlug(value: any): string {
-  return idSlug(rawRichToText(value)).split("-").filter(Boolean).slice(0, 4).join("-");
-}
-
-function idSlug(value: any): string {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function stemOfPath(filePath: string): string {
-  const base = String(filePath).split("/").pop() || "";
-  return base.replace(/\.[^.]+$/, "");
-}
 
 function normalizeRichText(value: any, canonicalFileId: IdentityFileId = identityFileId): RichTextValue {
   if (typeof value === "string") return value;

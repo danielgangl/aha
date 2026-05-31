@@ -13,6 +13,7 @@ import {
   AHA_FULL_WORKFLOW_INIT_PROMPT,
   AHA_FULL_WORKFLOW_UPDATE_PROMPT,
 } from "../src/prompts.js";
+import { overviewItemId } from "../src/lib/focus-id.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -977,57 +978,6 @@ function decisionItemRefValid(item, filePaths) {
   const filePath = item.path ?? item.fileId;
   if (filePath == null) return true;
   return filePaths.has(filePath);
-}
-
-// Stable, content-anchored id for an overview worklist item. The author id wins;
-// otherwise derive one from the primary evidence file + a short topic slug so the
-// id tracks the *concern*, not its list position. Triage state is keyed by this
-// id, so a positional id would make a reviewer's flag stick to a slot rather than
-// a topic after a regeneration (the re-review desync we are fixing).
-function overviewItemId(item, kind, used) {
-  const author = typeof item.id === "string" && item.id.trim() ? item.id.trim() : "";
-  const base = author || contentAnchoredOverviewId(item, kind);
-  let id = base;
-  let n = 2;
-  while (used.has(id)) {
-    id = `${base}-${n}`;
-    n += 1;
-  }
-  used.add(id);
-  return id;
-}
-
-function contentAnchoredOverviewId(item, kind) {
-  const evidence = Array.isArray(item.evidence) ? item.evidence : [];
-  const anchor = evidence.find((entry) => entry && (entry.path || entry.fileId));
-  const fileStem = anchor ? idSlug(stemOfPath(anchor.path || anchor.fileId)) : "";
-  const topic = topicSlug(item.title != null ? item.title : item.text);
-  const parts = [kind, fileStem, topic].filter(Boolean);
-  return parts.length > 1 ? parts.join("-") : `${kind}-item`;
-}
-
-function rawRichToText(value) {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value.map((part) => (typeof part === "string" ? part : (part && (part.label || part.id)) || "")).join(" ");
-  }
-  return "";
-}
-
-function topicSlug(value) {
-  return idSlug(rawRichToText(value)).split("-").filter(Boolean).slice(0, 4).join("-");
-}
-
-function idSlug(value) {
-  return String(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function stemOfPath(filePath) {
-  const base = String(filePath).split("/").pop() || "";
-  return base.replace(/\.[^.]+$/, "");
 }
 
 function preserveOverview(overview, refs) {
