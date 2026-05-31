@@ -16,7 +16,7 @@ import type {
   TriageStatus,
 } from "../types";
 import { categoryLabel, hasOverviewContent } from "../lib/pack";
-import { AsciiPanel, RefList, RichText } from "./rich";
+import { AsciiPanel, InlineText, RefList, RichText } from "./rich";
 import { CopyContextButton, DecisionCard, EvidenceRow, LensPill, ResolveZone, SectionBlock } from "../decisions.js";
 import type { FocusItem } from "../lib/review-focus";
 import { buildReviewFocus, focusItemContext } from "../lib/review-focus";
@@ -228,9 +228,17 @@ export function HighLevelView({
 
   const renderReReviewFocus = (item: FocusItem) =>
     renderFullFocus(item, {
-      topBanner: <ChangedSinceStrip status={statusMap[item.id]} baseline={baselines[item.id]} />,
-      // A click on the same prior status re-confirms (re-baselines) instead of clearing.
-      onSetStatus: (status: TriageStatus | null) => setStatus(item.id, status ?? statusMap[item.id] ?? null),
+      topBanner: (
+        <ChangedSinceStrip
+          status={statusMap[item.id]}
+          baseline={baselines[item.id]}
+          // Acknowledge: keep the prior call but re-baseline to current → leaves
+          // re-review. The triage buttons stay normal (clicking the active one
+          // still clears/un-triages, like everywhere else).
+          onAcknowledge={() => setStatus(item.id, statusMap[item.id] ?? null)}
+        />
+      ),
+      onSetStatus: (status: TriageStatus | null) => setStatus(item.id, status),
     });
 
   const renderResolvedFocus = (item: FocusItem) => {
@@ -549,20 +557,40 @@ function statusVerb(status: TriageStatus | undefined): string {
 }
 
 // Re-review provenance: what you judged ("A") and your prior call, shown above
-// the live card ("C") so you re-decide with context. Rendered as a card topBanner.
-function ChangedSinceStrip({ status, baseline }: { status: TriageStatus | undefined; baseline: FocusBaseline | undefined }) {
+// the live card ("C") so you re-decide with context. The "re-reviewed" button
+// keeps the prior call and re-baselines (acknowledges the change). Rendered as a
+// card topBanner.
+function ChangedSinceStrip({
+  status,
+  baseline,
+  onAcknowledge,
+}: {
+  status: TriageStatus | undefined;
+  baseline: FocusBaseline | undefined;
+  onAcknowledge: () => void;
+}) {
   if (!baseline) return null;
   return (
     <div className="mb-3 pb-3 border-b border-dashed border-line-2">
-      <div className="flex items-center gap-[6px] text-[11px] font-semibold text-amber-ink mb-[5px]">
-        <span>⟳</span>
-        <span>changed since you {statusVerb(status)}</span>
+      <div className="flex items-center gap-[6px] mb-[5px]">
+        <span className="flex-1 inline-flex items-center gap-[6px] text-[11px] font-semibold text-amber-ink">
+          <span aria-hidden="true">⟳</span>
+          <span>changed since you {statusVerb(status)}</span>
+        </span>
+        <button
+          type="button"
+          onClick={onAcknowledge}
+          title="Mark re-reviewed — keep your call and clear the changed flag"
+          className="h-[22px] px-[8px] inline-flex items-center gap-[5px] border border-line-2 rounded-[6px] bg-surface text-ink-3 font-mono text-[10.5px] normal-case cursor-pointer hover:bg-bg-3 hover:text-ink"
+        >
+          ✓ re-reviewed
+        </button>
       </div>
       <div className="text-[11.5px] leading-[1.5] text-ink-3 [text-wrap:pretty]">
         <span className="text-ink-4">was: </span>
-        <span className="text-ink-2">{baseline.title}</span>
-        {baseline.body && <span className="block mt-[2px]">{baseline.body}</span>}
-        {baseline.check && <span className="block mt-[2px]">Decide: {baseline.check}</span>}
+        <span className="text-ink-2"><InlineText text={baseline.title} /></span>
+        {baseline.body && <span className="block mt-[2px]"><InlineText text={baseline.body} /></span>}
+        {baseline.check && <span className="block mt-[2px]">Decide: <InlineText text={baseline.check} /></span>}
       </div>
     </div>
   );
@@ -628,7 +656,7 @@ function FocusCard({
         </div>
       )}
       {evidenceItems.length > 0 && (
-        <SectionBlock kind="evidence" label="Beleg">
+        <SectionBlock kind="evidence" label="Evidence">
           {evidenceItems.map((it, j) => (
             <EvidenceRow
               key={`${it.ref || "item"}-${it.path || it.fileId || "no-file"}-${it.line || j}`}

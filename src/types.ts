@@ -323,6 +323,10 @@ export interface FocusBaseline {
   title: string;
   body: string;
   check: string;
+  // Change-detection signature over ALL material fields (title, body, why,
+  // check, evidence anchors) — broader than the displayed title/body/check so a
+  // whyItMatters or evidence drift also surfaces the item for re-review.
+  sig: string;
   at: string;
 }
 

@@ -44,6 +44,7 @@ test("e2e: update cycle preserves ids and drives the A->C re-review delta", asyn
   const triage = {
     "dc-mock-db-read": "flag",
     "dc-seed-sender": "accept",
+    "dc-why-only": "accept",
     "assumption-impersonation": "flag",
     "hotspot-notification-parity": "accept",
   };
@@ -77,7 +78,9 @@ test("e2e: update cycle preserves ids and drives the A->C re-review delta", asyn
   const focus = buildReviewFocus(v2.decisions, v2.overview, triage, v2.files, baselines);
   const ids = (arr) => arr.map((it) => it.id).sort();
 
-  assert.deepEqual(ids(focus.reReview), ["assumption-impersonation", "dc-mock-db-read"], "changed-content triaged items surface as A->C re-review");
+  // dc-why-only changes ONLY whyItMatters between v1 and v2 — it must still
+  // surface (guards the baseline signature covering more than title/claim/check).
+  assert.deepEqual(ids(focus.reReview), ["assumption-impersonation", "dc-mock-db-read", "dc-why-only"], "changed-content triaged items (incl. whyItMatters-only) surface as A->C re-review");
   assert.deepEqual(ids(focus.resolved), ["dc-seed-sender", "hotspot-notification-parity"], "unchanged triaged items stay resolved");
   assert.deepEqual(ids(focus.open), ["dc-runtime-guideline"], "a new, never-judged concern is open");
 
@@ -204,6 +207,7 @@ const JUDGMENT_V1 = {
     cards: [
       { id: "dc-mock-db-read", category: "coverage", risk: "med", title: "Test deckt Persistenz nicht ab", claim: "Mock reicht nicht — braucht DB-Read?", whyItMatters: "Ohne DB-Read driftet die Spalte.", sections: [{ kind: "evidence", label: "Beleg", items: [{ path: "test/chat.test.mjs", line: 4, ref: "test/chat.test.mjs:4", desc: "Source-Text-Test" }] }, { kind: "check", label: "Check", text: "Reicht der Mock?" }] },
       { id: "dc-seed-sender", category: "trust", risk: "low", title: "Seed setzt senderId serverseitig", claim: "Seed-Actions setzen senderId aus auth.userId.", whyItMatters: "Verhindert Client-Spoofing.", sections: [{ kind: "evidence", label: "Beleg", items: [{ path: "src/chat.ts", line: 6, ref: "src/chat.ts:6", desc: "seedChat" }] }, { kind: "check", label: "Check", text: "Serverseitig gesetzt?" }] },
+      { id: "dc-why-only", category: "trust", risk: "low", title: "addMessage setzt senderId", claim: "addMessage leitet senderId aus auth.userId ab.", whyItMatters: "Stand v1: nur Demo-relevant.", sections: [{ kind: "evidence", label: "Beleg", items: [{ path: "src/chat.ts", line: 2, ref: "src/chat.ts:2", desc: "senderId" }] }, { kind: "check", label: "Check", text: "Quelle korrekt?" }] },
     ],
     questions: [],
   },
@@ -226,6 +230,8 @@ const JUDGMENT_V2 = {
       { id: "dc-mock-db-read", category: "coverage", risk: "med", title: "PGlite-Test beweist DB-Spalte", claim: "PGlite-Test beweist die DB-Spalte messages.sender_id.", whyItMatters: "Beweist Persistenz statt nur Source-Text.", sections: [{ kind: "evidence", label: "Beleg", items: [{ path: "test/chat.test.mjs", line: 4, ref: "test/chat.test.mjs:4", desc: "PGlite-DB-Read" }] }, { kind: "check", label: "Check", text: "Reicht der DB-Read als Nachweis?" }] },
       // same id, same content -> unchanged
       { id: "dc-seed-sender", category: "trust", risk: "low", title: "Seed setzt senderId serverseitig", claim: "Seed-Actions setzen senderId aus auth.userId.", whyItMatters: "Verhindert Client-Spoofing.", sections: [{ kind: "evidence", label: "Beleg", items: [{ path: "src/chat.ts", line: 6, ref: "src/chat.ts:6", desc: "seedChat" }] }, { kind: "check", label: "Check", text: "Serverseitig gesetzt?" }] },
+      // same id, same title/claim/check/evidence — ONLY whyItMatters changed -> must still surface
+      { id: "dc-why-only", category: "trust", risk: "low", title: "addMessage setzt senderId", claim: "addMessage leitet senderId aus auth.userId ab.", whyItMatters: "Stand v2: jetzt produktiv über PGlite abgesichert.", sections: [{ kind: "evidence", label: "Beleg", items: [{ path: "src/chat.ts", line: 2, ref: "src/chat.ts:2", desc: "senderId" }] }, { kind: "check", label: "Check", text: "Quelle korrekt?" }] },
       // new concern -> new id -> open
       { id: "dc-runtime-guideline", category: "coverage", risk: "med", title: "Resume/Guideline ohne PGlite", claim: "Resume- und Guideline-Flows haben nur Mock-Regression.", whyItMatters: "Offene Lücke ohne DB-Nachweis.", sections: [{ kind: "evidence", label: "Beleg", items: [{ path: "test/chat.test.mjs", line: 5, ref: "test/chat.test.mjs:5", desc: "nur Mock" }] }, { kind: "check", label: "Check", text: "Braucht es DB-Tests für Resume?" }] },
     ],

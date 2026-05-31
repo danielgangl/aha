@@ -2477,7 +2477,9 @@ function ahaJsonPlugin(packFile, runtime = {}) {
               return;
             }
             fs.mkdirSync(path.dirname(stateFile), { recursive: true });
-            const tmpFile = `${stateFile}.${process.pid}.tmp`;
+            // Unique per write so overlapping PUTs from this process can't clobber
+            // each other's temp file mid-write (rename stays atomic-visible).
+            const tmpFile = `${stateFile}.${process.pid}.${stateWriteSeq++}.tmp`;
             fs.writeFileSync(tmpFile, JSON.stringify(state, null, 2) + "\n");
             fs.renameSync(tmpFile, stateFile);
             res.end(JSON.stringify({ ok: true, path: stateFile }) + "\n");
@@ -2677,10 +2679,18 @@ function reviewedCountForPack(packFile) {
 // Review Focus burn-down per pack: total = decisions + hotspots + assumptions;
 // decided/flagged/blocked come from the per-pack triage in the state sidecar.
 function focusProgressForPack(packFile, pack) {
-  const focusTotal =
-    (Array.isArray(pack?.decisions?.cards) ? pack.decisions.cards.length : 0) +
-    (Array.isArray(pack?.overview?.hotspots) ? pack.overview.hotspots.length : 0) +
-    (Array.isArray(pack?.overview?.assumptions) ? pack.overview.assumptions.length : 0);
+  // The ids that still exist in the pack — triage for any other id is an orphan
+  // (a retired/renamed item) and must not count toward progress.
+  const focusIds = new Set(
+    [
+      ...(Array.isArray(pack?.decisions?.cards) ? pack.decisions.cards : []),
+      ...(Array.isArray(pack?.overview?.hotspots) ? pack.overview.hotspots : []),
+      ...(Array.isArray(pack?.overview?.assumptions) ? pack.overview.assumptions : []),
+    ]
+      .map((item) => item?.id)
+      .filter((id) => typeof id === "string" && id),
+  );
+  const focusTotal = focusIds.size;
   let decided = 0;
   let focusFlagged = 0;
   let focusBlocked = 0;
@@ -2689,7 +2699,8 @@ function focusProgressForPack(packFile, pack) {
     if (fs.existsSync(stateFile)) {
       const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
       if (state?.decisions && typeof state.decisions === "object") {
-        for (const value of Object.values(state.decisions)) {
+        for (const [id, value] of Object.entries(state.decisions)) {
+          if (!focusIds.has(id)) continue;
           if (value === "accept" || value === "flag" || value === "block") decided += 1;
           if (value === "flag") focusFlagged += 1;
           if (value === "block") focusBlocked += 1;
@@ -2699,7 +2710,7 @@ function focusProgressForPack(packFile, pack) {
   } catch {
     // ignore unreadable/partial state
   }
-  return { focusTotal, focusDecided: Math.min(decided, focusTotal), focusFlagged, focusBlocked };
+  return { focusTotal, focusDecided: decided, focusFlagged, focusBlocked };
 }
 
 // Target repos the served app may initialize PRs from. Names only ever cross to
@@ -2859,6 +2870,9 @@ function reportPathFor(file) {
   return `${base}.update-report.json`;
 }
 
+// Monotonic per-process counter for unique state temp-file names.
+let stateWriteSeq = 0;
+
 function sanitizeReviewState(input) {
   const viewed = Array.isArray(input?.viewed)
     ? Array.from(new Set(input.viewed.filter((id) => typeof id === "string")))
@@ -2893,6 +2907,7 @@ function sanitizeReviewState(input) {
         title: typeof raw.title === "string" ? raw.title : "",
         body: typeof raw.body === "string" ? raw.body : "",
         check: typeof raw.check === "string" ? raw.check : "",
+        sig: typeof raw.sig === "string" ? raw.sig : "",
         at: typeof raw.at === "string" ? raw.at : "",
       };
     }

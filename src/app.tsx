@@ -122,6 +122,9 @@ function App({
   // back, struck through), likely-noise files hidden.
   const [includeViewed, setIncludeViewed] = useState(false);
   const [includeNoise, setIncludeNoise] = useState(false);
+  // Re-review burn-down: focus the code list on files that changed since you
+  // last marked them viewed (the file-level "what moved under me").
+  const [onlyChanged, setOnlyChanged] = useState(false);
   // FileCard still speaks the legacy NoiseMode; "expanded" is now reached only
   // by the per-block inline reveal, not a global control.
   const noiseMode: NoiseMode = includeNoise ? "all" : "focus";
@@ -145,8 +148,10 @@ function App({
       includeNoise,
       includeViewed,
       reviewedSet: reviewed,
+      changedViewedSet: changedViewedFiles,
+      onlyChanged,
     }),
-    [baseCodeView, includeNoise, includeViewed, reviewed, pr.reviewSignals]
+    [baseCodeView, includeNoise, includeViewed, onlyChanged, reviewed, changedViewedFiles, pr.reviewSignals]
   );
 
   useEffect(() => {
@@ -181,6 +186,32 @@ function App({
     };
     persistReviewState(reviewStateKey, state, selectedPackId);
   }, [decisionStatus, baselines, reviewed, selectedPackId, viewedFileMap, reviewStateKey]);
+
+  // Re-review focus is meaningful only while something changed; clear the sticky
+  // flag once the changed-set empties so it can't silently re-engage later.
+  useEffect(() => {
+    if (onlyChanged && changedViewedFiles.size === 0) setOnlyChanged(false);
+  }, [onlyChanged, changedViewedFiles]);
+
+  // Backfill a baseline for any already-triaged item that has none (state from
+  // before baselines existed) so its future drift can surface as re-review.
+  const baselineBackfilledRef = useRef(false);
+  useEffect(() => {
+    if (baselineBackfilledRef.current) return;
+    baselineBackfilledRef.current = true;
+    setBaselines((prev) => {
+      let added = false;
+      const next = { ...prev };
+      for (const id of Object.keys(decisionStatus)) {
+        if (next[id]) continue;
+        const item = focusIndex.get(id);
+        if (!item) continue;
+        next[id] = focusItemSnapshot(item, new Date().toISOString());
+        added = true;
+      }
+      return added ? next : prev;
+    });
+  }, [decisionStatus, focusIndex]);
 
   const onSymbol = useCallback((id: string) => {
     setActiveSymId(id);
@@ -521,6 +552,9 @@ function App({
             onIncludeViewedChange={setIncludeViewed}
             includeNoise={includeNoise}
             onIncludeNoiseChange={setIncludeNoise}
+            changedSinceReviewCount={changedViewedFiles.size}
+            onlyChanged={onlyChanged}
+            onOnlyChangedChange={setOnlyChanged}
             noiseFileCount={noiseFileCount}
             totalFileCount={totalFileCount}
             reviewedCount={reviewedCount}
@@ -1202,12 +1236,25 @@ function normalizeRef(ref: any, canonicalFileId: IdentityFileId = identityFileId
   return id ? { ...ref, id } : null;
 }
 
+// Content-anchored fallback id for an author-id-less decision card (mirrors the
+// overview items): category + primary evidence file + topic slug, never the list
+// position, so triage doesn't stick to a slot across regeneration.
+function decisionFallbackId(card: any, index: number): string {
+  const sections = Array.isArray(card?.sections) ? card.sections : [];
+  const anchor = sections
+    .flatMap((sec: any) => (Array.isArray(sec?.items) ? sec.items : []))
+    .find((it: any) => it && (it.path || it.fileId));
+  const fileStem = anchor ? idSlug(stemOfPath(anchor.path || anchor.fileId)) : "";
+  const topic = topicSlug(card?.title || card?.claim || "");
+  const parts = ["dc", slugId(card?.category || "decision"), fileStem, topic].filter(Boolean);
+  return parts.length > 2 ? parts.join("-") : `dc-${slugId(card?.category || "decision")}-${index + 1}`;
+}
+
 function normalizeDecisionCards(cards: any, canonicalFileId: IdentityFileId = identityFileId): any[] {
   if (!Array.isArray(cards)) return [];
   const used = new Set<string>();
   return cards.map((card: any, index: number) => {
-    const fallback = `dc-${slugId(card?.category || "decision")}-${index + 1}`;
-    const rawId = typeof card?.id === "string" && card.id.trim() ? card.id.trim() : fallback;
+    const rawId = typeof card?.id === "string" && card.id.trim() ? card.id.trim() : decisionFallbackId(card, index);
     let id = rawId;
     let suffix = 2;
     while (used.has(id)) {
@@ -1421,15 +1468,20 @@ interface RailFilterOptions {
   includeNoise: boolean;
   includeViewed: boolean;
   reviewedSet: Set<string>;
+  changedViewedSet: Set<string>;
+  onlyChanged: boolean;
 }
 
 // Shrink the code view to "what still needs attention": optionally drop
-// likely-noise files and/or files already marked viewed. Drives both the rail
-// and the center document so the two stay in lockstep.
+// likely-noise files and/or files already marked viewed. The re-review focus
+// (onlyChanged) overrides both — it scopes to just the files that changed since
+// you last viewed them. Drives both the rail and the center document in lockstep.
 function applyRailFilters(codeView: CodeView, opts: RailFilterOptions): CodeView {
-  const { reviewSignals, includeNoise, includeViewed, reviewedSet } = opts;
-  if (includeNoise && includeViewed) return codeView;
+  const { reviewSignals, includeNoise, includeViewed, reviewedSet, changedViewedSet, onlyChanged } = opts;
+  const focusChanged = onlyChanged && changedViewedSet.size > 0;
+  if (!focusChanged && includeNoise && includeViewed) return codeView;
   const isVisible = (file: PackFile) => {
+    if (focusChanged) return changedViewedSet.has(fileReviewKey(file));
     if (!includeNoise && isNoiseSignal(reviewSignals?.files?.[fileSignalKey(file)])) return false;
     if (!includeViewed && reviewedSet.has(fileReviewKey(file))) return false;
     return true;
@@ -1585,6 +1637,7 @@ function normalizeReviewState(input: any, pr: Pr): ReviewState {
         title: typeof raw.title === "string" ? raw.title : "",
         body: typeof raw.body === "string" ? raw.body : "",
         check: typeof raw.check === "string" ? raw.check : "",
+        sig: typeof raw.sig === "string" ? raw.sig : "",
         at: typeof raw.at === "string" ? raw.at : "",
       };
     }

@@ -322,6 +322,9 @@ export function LeftRail({
   onIncludeViewedChange,
   includeNoise,
   onIncludeNoiseChange,
+  changedSinceReviewCount,
+  onlyChanged,
+  onOnlyChangedChange,
   noiseFileCount,
   totalFileCount,
   reviewedCount,
@@ -341,12 +344,17 @@ export function LeftRail({
   onIncludeViewedChange: (next: boolean) => void;
   includeNoise: boolean;
   onIncludeNoiseChange: (next: boolean) => void;
+  changedSinceReviewCount: number;
+  onlyChanged: boolean;
+  onOnlyChangedChange: (next: boolean) => void;
   noiseFileCount: number;
   totalFileCount: number;
   reviewedCount: number;
   hiddenByFilters: number;
 }) {
   const [fileQuery, setFileQuery] = useState("");
+  // While the changed-since-review focus is engaged it overrides Viewed/Noise.
+  const focusActive = onlyChanged && changedSinceReviewCount > 0;
   const reviewedPct = totalFileCount > 0 ? (reviewedCount / totalFileCount) * 100 : 0;
   const hasAiOrder = readingOrders.length > 0;
   const activeOrder = readingOrders.find((order) => order.key === readingMode);
@@ -429,24 +437,53 @@ export function LeftRail({
           Grouped
         </SwitchButton>
       </div>
+      {/* ── Re-review burn-down: only what changed since you last viewed ── */}
+      {changedSinceReviewCount > 0 && (
+        <div className="px-2.5 pt-1.5 pb-1">
+          <button
+            type="button"
+            data-active={onlyChanged}
+            onClick={() => onOnlyChangedChange(!onlyChanged)}
+            title="Show only files that changed since you last marked them viewed — re-review just what moved, not the whole PR again."
+            className={[
+              "w-full inline-flex items-center gap-2 h-[26px] px-2 rounded-[6px] cursor-pointer text-[11px] font-medium transition-colors",
+              "border border-line-2 bg-blue-soft text-blue-ink hover:border-blue",
+              "data-[active=true]:bg-blue data-[active=true]:text-white data-[active=true]:border-blue",
+            ].join(" ")}
+          >
+            <span aria-hidden="true">⟳</span>
+            <span className="flex-1 min-w-0 text-left overflow-hidden text-ellipsis whitespace-nowrap">
+              {changedSinceReviewCount} changed since you reviewed
+            </span>
+            {onlyChanged && <span className="font-mono text-[10px] opacity-90">showing only</span>}
+          </button>
+        </div>
+      )}
       {/* ── Filters: shrink the list to what still needs attention ── */}
       <div className="flex items-center gap-4 px-2.5 pb-2 pt-1 border-b border-line">
         <FilterCheckbox
           label="Viewed"
           on={includeViewed}
+          disabled={focusActive}
           onClick={() => onIncludeViewedChange(!includeViewed)}
-          title="Keep files you've marked viewed in the list (struck through). Uncheck to hide them and focus on what's left."
+          title={
+            focusActive
+              ? "Disabled while focused on changed-since-review files."
+              : "Keep files you've marked viewed in the list (struck through). Uncheck to hide them and focus on what's left."
+          }
         />
         <FilterCheckbox
           label="Noise"
           on={includeNoise}
-          disabled={noiseFileCount === 0}
+          disabled={noiseFileCount === 0 || focusActive}
           count={noiseFileCount || undefined}
           onClick={() => onIncludeNoiseChange(!includeNoise)}
           title={
-            noiseFileCount > 0
-              ? "Show low-signal files flagged as likely review-irrelevant (lockfiles, generated output, etc.)."
-              : "No likely-noise files in this PR"
+            focusActive
+              ? "Disabled while focused on changed-since-review files."
+              : noiseFileCount > 0
+                ? "Show low-signal files flagged as likely review-irrelevant (lockfiles, generated output, etc.)."
+                : "No likely-noise files in this PR"
           }
         />
         {hiddenByFilters > 0 && !normalizedQuery && (

@@ -1,5 +1,6 @@
 import type {
   DecisionCardData,
+  DecisionJump,
   Decisions,
   FocusBaseline,
   Lens,
@@ -55,21 +56,48 @@ export function indexFocusItems(decisions: Decisions, overview: Overview | null)
   return new Map(allFocusItems(decisions, overview).map((item) => [item.id, item] as const));
 }
 
-// The reviewable content of an item as plain text — the comparable shape behind
-// a baseline. decide: title + claim + check · inspect: title + why + check ·
-// verify: text + check.
-function focusContent(item: FocusItem): { lens: Lens; title: string; body: string; check: string } {
+// A stable signature of one item's evidence anchors (path:line:ref:desc).
+function evidenceSig(items: DecisionJump[] | undefined): string {
+  if (!Array.isArray(items)) return "";
+  return items
+    .filter(Boolean)
+    .map((it) => `${it.path || it.fileId || ""}:${it.line ?? ""}:${it.ref || ""}:${it.desc || ""}`)
+    .join("|");
+}
+
+// The reviewable content of an item. title/body/check are the displayed gist
+// (decide: title+claim+check · inspect: title+why+check · verify: text+check);
+// `sig` additionally folds in whyItMatters and the evidence anchors so any
+// material drift — not just the headline — is detected as "needs re-review".
+function focusContent(item: FocusItem): { lens: Lens; title: string; body: string; check: string; sig: string } {
+  let lens: Lens = "decide";
+  let title = "";
+  let body = "";
+  let check = "";
+  let why = "";
+  let evidence = "";
   if (item.decision) {
-    const check = (item.decision.sections || []).find((sec) => sec.kind === "check")?.text || "";
-    return { lens: "decide", title: item.decision.title || "", body: item.decision.claim || "", check };
+    const sections = Array.isArray(item.decision.sections) ? item.decision.sections : [];
+    check = sections.find((sec) => sec.kind === "check")?.text || "";
+    evidence = evidenceSig(sections.filter((sec) => sec.kind !== "check").flatMap((sec) => sec.items || []));
+    lens = "decide";
+    title = item.decision.title || "";
+    body = item.decision.claim || "";
+    why = item.decision.whyItMatters || "";
+  } else if (item.hotspot) {
+    lens = "inspect";
+    title = richTextToPlain(item.hotspot.title);
+    body = richTextToPlain(item.hotspot.why);
+    check = item.hotspot.check || "";
+    evidence = evidenceSig(item.hotspot.evidence);
+  } else if (item.assumption) {
+    lens = "verify";
+    title = richTextToPlain(item.assumption.text);
+    check = item.assumption.check || "";
+    evidence = evidenceSig(item.assumption.evidence);
   }
-  if (item.hotspot) {
-    return { lens: "inspect", title: richTextToPlain(item.hotspot.title), body: richTextToPlain(item.hotspot.why), check: item.hotspot.check || "" };
-  }
-  if (item.assumption) {
-    return { lens: "verify", title: richTextToPlain(item.assumption.text), body: "", check: item.assumption.check || "" };
-  }
-  return { lens: "decide", title: "", body: "", check: "" };
+  const sig = [lens, title, body, why, check, evidence].join("");
+  return { lens, title, body, check, sig };
 }
 
 // Snapshot to store when the reviewer triages an item — the "A" baseline.
@@ -78,10 +106,12 @@ export function focusItemSnapshot(item: FocusItem, at: string): FocusBaseline {
 }
 
 // Did the item's content drift from the baseline the reviewer judged? false when
-// there is no baseline (never triaged, or pre-baseline state) — no delta to show.
+// there is no baseline (never triaged) — no delta to show. Compares the full
+// signature; falls back to the visible fields for baselines captured before sig.
 export function focusBaselineChanged(baseline: FocusBaseline | undefined, item: FocusItem): boolean {
   if (!baseline) return false;
   const now = focusContent(item);
+  if (typeof baseline.sig === "string" && baseline.sig.length > 0) return baseline.sig !== now.sig;
   return baseline.title !== now.title || baseline.body !== now.body || baseline.check !== now.check;
 }
 
@@ -112,7 +142,9 @@ export function buildReviewFocus(
   // Triaged + content changed since the baseline you judged → re-review; else resolved.
   const reReview = triaged.filter((it) => focusBaselineChanged(baselines[it.id], it)).sort(byRank);
   const resolved = triaged.filter((it) => !focusBaselineChanged(baselines[it.id], it)).sort(byRank);
-  const nonAccepted = resolved.filter((it) => statusMap[it.id] === "flag" || statusMap[it.id] === "block");
+  // Everything still flagged/blocked is unresolved work for an agent — including
+  // items that drifted into re-review (they'd otherwise silently fall out).
+  const nonAccepted = [...reReview, ...resolved].filter((it) => statusMap[it.id] === "flag" || statusMap[it.id] === "block");
   const nonAcceptedContext = nonAccepted
     .map((it) => focusItemContext(it, decisions, files, statusMap))
     .filter(Boolean)

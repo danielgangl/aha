@@ -426,7 +426,7 @@ test("review state PUT keeps baselines only for triaged items", async () => {
     const index = await waitForJson(`http://127.0.0.1:${port}/aha-packs.json`);
     const packId = index.packs[0].id;
     const url = `http://127.0.0.1:${port}/aha-state.json?pack=${encodeURIComponent(packId)}`;
-    const baseline = { lens: "decide", title: "Old A", body: "old claim", check: "still right?", at: "2026-05-29T00:00:00.000Z" };
+    const baseline = { lens: "decide", title: "Old A", body: "old claim", check: "still right?", sig: "decideOld Aold claimstill right?", at: "2026-05-29T00:00:00.000Z" };
     const put = await putJson(url, {
       schemaVersion: "0.2",
       viewed: [],
