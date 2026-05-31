@@ -100,8 +100,9 @@ The fragment may contain these fields only:
    Summarize what is NEW in the diff since that prior view — not the full PR delta (file.note covers that).
    Keep it short: one paragraph or 2–3 bullets max.
    German, same tone as file.note.
+   Do not prefix it with a "seit deinem letzten Blick" / "since last viewed" phrase — the viewer already labels this block. Start straight with the delta.
    Good:
-   - "<p>Neu seit deinem letzten Blick: <code>frontPlacement</code> wird an <code>CapacityTicketFace</code> durchgereicht — Layout-Messphase vs. gestapelte Karte.</p>"
+   - "<p><code>frontPlacement</code> wird an <code>CapacityTicketFace</code> durchgereicht — Layout-Messphase vs. gestapelte Karte.</p>"
    - "<ul><li>Forest-Palette: hardcodierte Grüntöne → <code>forest-*</code>-Utilities.</li><li>Kein Verhaltensdelta.</li></ul>"
    Bad:
    - Repeating the entire file.note verbatim.
@@ -299,7 +300,10 @@ Wording:
 - UI text soll mit lowest cognitive friction auffassbar für Menschen wie möglich sein, sodass auch komplexe Sachverhalte extrem schnell verstanden werden.
 - Verb vor Nomen, parallele Listenform statt verschachtelter Sätze, konkrete Zustände statt abstrakter Substantivketten.
 
-Task:
+Text format (strict):
+- Every text field in this fragment is PLAIN TEXT. Never emit HTML tags - no <code>, <p>, <ul>, <li>, <b>, <br>, no entities. This applies to: mentalModelDelta, modelDelta title/before/after, flow titles, systemMap title/labels, assumption text, hotspot title/why, and decision title/claim/whyItMatters, section desc, and check text.
+- To mark a code identifier inline, write it bare (getMessage) or wrap it in single backticks (\`getMessage\`). The viewer renders backticks as inline code. Do not wrap it in <code>.
+- HTML belongs only to file-note fields produced by a different step - not here.
 Create a fragment containing \`overview\` and \`decisions\` only.
 Add or refresh decisions only for concrete review decisions supported by repo evidence.
 
@@ -313,6 +317,12 @@ Anti-duplication rule:
 - If a point is something the reviewer must accept, flag, or block before merge, put it in decisions.
 - If a decision covers a hotspot, do not also add that hotspot unless the hotspot is a broader inspection area with a different reviewer action.
 - Before writing the fragment, scan titles and first sentences across overview and decisions. Merge or delete near-duplicates.
+
+Ids (stable, concern-anchored):
+- Give every triaged item - decision cards, assumptions, and hotspots - an explicit \`id\` that describes the concern, e.g. \`dc-token-revocation\`, \`assumption-tenant-isolation\`, \`hotspot-cache-invalidation\`. Lowercase, hyphenated, stable.
+- The id identifies the *concern*, not its list position. Two genuinely different concerns get two different ids; never reuse an id for a different concern.
+- These ids are the key the reviewer's triage state is stored under, so a positional or reshuffled id silently loses their decision later.
+- If you are regenerating for an update and a previous pack exists, reuse the existing id for any concern that is still the same; only mint new ids for genuinely new concerns.
 
 Judge the PR yourself:
 - A large/complex PR may justify several flows, multiple assumptions, and several hotspots.
@@ -373,11 +383,13 @@ The overview may include:
    Load-bearing assumptions that must be true for correctness. Include the ones a reviewer would otherwise have to reconstruct themselves. Omit obvious or generic ones.
    Assumptions are "this must be true externally or across runtime state", not "this code changed".
    Do not duplicate modelDeltas or decisions.
+   Like decisions, an assumption is a worklist item the reviewer triages. Give it the same payload a decision has: \`evidence\` (path + line + short desc pointing at where it is relied on) and \`check\` (the one concrete thing to verify). Omit \`evidence\`/\`check\` only when no real code anchor exists.
 
 6. \`hotspots\`
    Specific areas worth extra scrutiny, tied to concrete symbols/files/decisions. Skip anything generic ("check edge cases", "review permissions") that isn't anchored to something real in this PR.
    Hotspots are "look here carefully", not "decide whether this is acceptable".
    Do not duplicate decision cards. If the same point is triage-worthy, prefer a decision card.
+   Like decisions, a hotspot is a worklist item the reviewer triages. Give it \`evidence\` (path + line + short desc pointing at the exact spot) and \`check\` (the one concrete thing to confirm). Omit them only when there is genuinely no single anchor.
 
 7. \`decisions\`
    Add decision cards only for real review decisions supported by repo evidence.
@@ -446,19 +458,29 @@ Schema:
     ],
     "assumptions": [
       {
+        "id": "assumption-short-concern-slug",
         "text": "Concise assumption",
         "refs": [
           { "type": "symbol", "id": "existing-symbol-id" }
-        ]
+        ],
+        "evidence": [
+          { "path": "existing/files/path.ts", "line": 42, "ref": "existing/files/path.ts:42", "desc": "where this assumption is relied on" }
+        ],
+        "check": "What concrete thing should the reviewer verify is true?"
       }
     ],
     "hotspots": [
       {
+        "id": "hotspot-short-concern-slug",
         "title": "Concrete hotspot",
         "why": "Why this needs careful review",
         "refs": [
           { "type": "file", "id": "existing-file-id" }
-        ]
+        ],
+        "evidence": [
+          { "path": "existing/files/path.ts", "line": 42, "ref": "existing/files/path.ts:42", "desc": "the exact spot to inspect" }
+        ],
+        "check": "What concrete thing should the reviewer confirm here?"
       }
     ]
   }
@@ -823,6 +845,12 @@ Your job:
 9. Run:
    ${ahaCommand("normalize")}
 10. Parse the JSON again to confirm it is valid.
+
+Triage id continuity (critical):
+- The reviewer's triage state (accept / flag / block) is stored in a sidecar, keyed by item id, for decision cards, assumptions, and hotspots.
+- When you refine, reword, or re-anchor an item that is still the SAME concern, KEEP its existing id from the previous pack (use updateReport.backupPath to read the old ids). A changed id silently drops the reviewer's decision.
+- Mint a NEW id only for a genuinely new concern.
+- Never reuse an existing id for a different concern. If a concern no longer applies, drop the item - its id simply retires.
 
 How to use the update report:
 - files.added: inspect for new review context.

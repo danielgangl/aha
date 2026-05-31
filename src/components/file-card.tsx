@@ -19,6 +19,13 @@ import {
 } from "../lib/diff";
 import { AiNote, ContextSignalMarker, DiffRow, NoiseBlock } from "./diff";
 
+// The "Since last viewed" header already labels this block, so drop any leading
+// "(Neu) seit deinem letzten Blick" prefix the AI note still carries (keeps a
+// leading <p> intact). Fixes existing packs; the prompt also no longer emits it.
+function stripChangedNotePrefix(html: string | undefined): string {
+  return (html || "").replace(/^(\s*<p>\s*)?(?:neu\s+)?seit\s+deinem\s+letzten\s+blick\s*[:–—-]?\s*/i, "$1");
+}
+
 // ── Reusable subcomponents (within-file) ───────────────────────
 
 // `.copy-icon` / `.check-icon` — pseudo-element art reproduced as JSX.
@@ -359,8 +366,8 @@ export function FileCard({
       {!collapsed && changedSinceViewed && file.changedNote && (
         <div className="file-changed-note sticky top-[calc(var(--file-head-sticky-top,74px)+49px+(var(--file-note-offset,0px)))] z-[2] grid grid-cols-[6px_minmax(0,1fr)] items-start gap-[7px] border-b border-l-2 border-t border-b-[var(--line)] border-l-[var(--amber)] border-t-[color-mix(in_oklab,var(--line)_70%,transparent)] bg-[color-mix(in_oklab,var(--amber)_8%,var(--surface))] py-[6px] pl-[48px] pr-[16px] font-sans text-[12px] leading-[1.4] text-[var(--ink-2)] before:mt-[5px] before:h-[6px] before:w-[6px] before:rounded-full before:bg-[var(--amber)] before:content-['']">
           <span className="min-w-0">
-            <span className="mb-[3px] block font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--amber)]">Seit last viewed</span>
-            <span className="file-changed-note-text min-w-0" dangerouslySetInnerHTML={{ __html: file.changedNote || "" }} />
+            <span className="mb-[3px] block font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--amber)]">Since last viewed</span>
+            <span className="file-changed-note-text min-w-0" dangerouslySetInnerHTML={{ __html: stripChangedNotePrefix(file.changedNote) }} />
           </span>
         </div>
       )}

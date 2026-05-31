@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type {
   DecisionCardData,
   DecisionCategory,
@@ -13,6 +14,8 @@ import type {
   TriageStatus,
 } from "./types";
 import { DiffExcerpt } from "./components/diff";
+import { InlineText } from "./components/rich";
+import { StatusPill, TriageButtons } from "./components/triage";
 
 // v2/decisions.jsx — Decisions Mode.
 // Decision Cards stacked vertically. Each card states a decision/claim,
@@ -31,10 +34,6 @@ const RISK_LABEL: Record<string, string> = { high: "High risk", med: "Med risk",
 // .cat-pill
 const CAT_PILL_CLASS =
   "inline-flex items-center h-5 px-2 rounded-[4px] bg-bg-3 text-ink-2 font-mono text-[10px] font-medium tracking-[0.03em] uppercase";
-
-// .dc-status-pill (base, before .st-* color)
-const STATUS_PILL_BASE =
-  "inline-flex items-center h-5 px-2 rounded-[4px] font-mono text-[10px] font-semibold tracking-[0.03em]";
 
 function CategoryPillBox({ children }: { children: React.ReactNode }) {
   return <span className={CAT_PILL_CLASS}>{children}</span>;
@@ -60,66 +59,9 @@ function RiskPill({ risk }: { risk?: string }) {
   );
 }
 
-function StatusPill({ status }: { status: TriageStatus }) {
-  // .dc-status-pill.st-{status}
-  const tone =
-    status === "accept"
-      ? "bg-pine-soft text-pine-ink"
-      : status === "flag"
-      ? "bg-amber-soft text-amber-ink"
-      : "bg-rose-soft text-rose-ink";
-  return (
-    <span className={`${STATUS_PILL_BASE} ${tone}`}>
-      {status === "accept" && "✓ Accepted"}
-      {status === "flag" && "? Flagged for discussion"}
-      {status === "block" && "✗ Blocker"}
-    </span>
-  );
-}
-
 function CategoryPill({ category, categories }: { category?: string; categories: DecisionCategory[] }) {
   const c = categories.find((c) => c.key === category);
   return <CategoryPillBox>{c?.label || category}</CategoryPillBox>;
-}
-
-// .dc-triage + .dc-tri (the three triage toggle buttons, shared visual)
-function TriageButtons({
-  status,
-  onSetStatus,
-  acceptTitle = "Accept this decision",
-}: {
-  status: Status;
-  onSetStatus: (status: TriageStatus | null) => void;
-  acceptTitle?: string;
-}) {
-  // .dc-tri base
-  const base =
-    "appearance-none w-[26px] h-[26px] border border-line-2 bg-surface rounded-[6px] text-ink-3 text-[13px] font-semibold cursor-pointer inline-flex items-center justify-center font-mono hover:bg-bg-3 hover:text-ink";
-  return (
-    <div className="flex gap-1">
-      <button
-        className={`${base} ${status === "accept" ? "bg-pine! text-white! border-pine!" : ""}`}
-        onClick={() => onSetStatus(status === "accept" ? null : "accept")}
-        title={acceptTitle}
-      >
-        ✓
-      </button>
-      <button
-        className={`${base} ${status === "flag" ? "bg-amber! text-ink! border-amber!" : ""}`}
-        onClick={() => onSetStatus(status === "flag" ? null : "flag")}
-        title="Flag for discussion"
-      >
-        ?
-      </button>
-      <button
-        className={`${base} ${status === "block" ? "bg-rose! text-white! border-rose!" : ""}`}
-        onClick={() => onSetStatus(status === "block" ? null : "block")}
-        title="Mark as blocker"
-      >
-        ✗
-      </button>
-    </div>
-  );
 }
 
 // .dc-head — shared card header shell (tags left, triage right)
@@ -191,7 +133,9 @@ function EvidenceRow({
             {item?.ref}
           </span>
           {item?.desc && (
-            <span className="text-[12px] leading-[1.45] text-ink-2 [text-wrap:pretty]">{item.desc}</span>
+            <span className="text-[12px] leading-[1.45] text-ink-2 [text-wrap:pretty]">
+              <InlineText text={item.desc} />
+            </span>
           )}
         </div>
         {isLink && (
@@ -275,7 +219,7 @@ export function ResolveZone({
         {question ? (
           <>
             <span className="block text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3 mb-[2px]">Decide</span>
-            <span className="text-[13px] leading-[1.45] text-ink font-medium [text-wrap:pretty]">{question}</span>
+            <span className="text-[13px] leading-[1.45] text-ink font-medium [text-wrap:pretty]"><InlineText text={question} /></span>
           </>
         ) : (
           <span className="text-[12px] text-ink-3">Your call</span>
@@ -301,6 +245,7 @@ function DecisionCard({
   symbols,
   onSymbol,
   lens,
+  topBanner,
 }: {
   card: DecisionCardData;
   categories: DecisionCategory[];
@@ -315,6 +260,8 @@ function DecisionCard({
   symbols?: SymbolMap;
   onSymbol?: SymbolHandler;
   lens?: Lens;
+  // Optional strip rendered inside the card, above the head (re-review provenance).
+  topBanner?: ReactNode;
 }) {
   const sections = Array.isArray(card.sections) ? card.sections : [];
   const checkSection = sections.find((sec) => sec.kind === "check");
@@ -351,6 +298,7 @@ function DecisionCard({
       id={card.id}
       data-risk={card.risk}
     >
+      {topBanner}
       <CardHead>
         <div className="flex gap-[6px] flex-wrap items-center">
           {lens && <LensPill lens={lens} />}
@@ -361,15 +309,17 @@ function DecisionCard({
       </CardHead>
 
       <h3 className="font-sans font-semibold text-base leading-[1.3] tracking-[-0.008em] text-ink mt-[6px] mb-2">
-        {card.title}
+        <InlineText text={card.title} />
       </h3>
-      <p className="text-[13.5px] leading-[1.55] text-ink mt-0 mb-[10px] [text-wrap:pretty]">{card.claim}</p>
+      <p className="text-[13.5px] leading-[1.55] text-ink mt-0 mb-[10px] [text-wrap:pretty]">
+        <InlineText text={card.claim} />
+      </p>
       {card.whyItMatters && (
         <p className="text-[12.5px] leading-[1.55] text-ink-2 mt-0 mb-3 [text-wrap:pretty] pl-3 border-l-2 border-line-2">
           <span className="block text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3 mb-1">
             Why it matters
           </span>
-          {card.whyItMatters}
+          <InlineText text={card.whyItMatters} />
         </p>
       )}
 
@@ -434,7 +384,7 @@ function QuestionsList({ questions, onJump }: { questions: DecisionQuestion[]; o
             {i + 1}
           </span>
           <div className="flex flex-col gap-[7px]">
-            <div className="text-[13.5px] leading-[1.5] text-ink font-sans [text-wrap:pretty]">{q.text}</div>
+            <div className="text-[13.5px] leading-[1.5] text-ink font-sans [text-wrap:pretty]"><InlineText text={q.text} /></div>
             <div className="flex gap-[6px] flex-wrap">
               {(Array.isArray(q.jumps) ? q.jumps : []).filter(Boolean).map((j, k) => (
                 <button
@@ -683,4 +633,4 @@ function DecisionsView({
   );
 }
 
-export { DecisionCard, DecisionsView, DecisionsLeftRail };
+export { DecisionCard, DecisionsView, DecisionsLeftRail, EvidenceRow, SectionBlock };

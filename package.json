@@ -12,6 +12,7 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "node --test",
+    "e2e:rereview": "node --test test/e2e-rereview.test.mjs",
     "serve": "node bin/aha.mjs serve --pack sample/aha.json",
     "review": "node bin/aha.mjs review --pack sample/aha.json",
     "start": "node bin/aha.mjs start"

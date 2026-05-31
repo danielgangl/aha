@@ -6,6 +6,7 @@ import type {
   CodeViewGroup,
   DiffLine,
   FileSignal,
+  FocusBaseline,
   NoiseMode,
   Overview,
   PackIndexEntry,
@@ -40,6 +41,8 @@ import {
   dirname,
 } from "./lib/pack";
 import { plainDiffContent } from "./lib/diff";
+import { focusItemSnapshot, indexFocusItems } from "./lib/review-focus";
+import { idSlug, overviewItemId, stemOfPath, topicSlug } from "./lib/focus-id.js";
 import { CallSitesPanel } from "./components/call-sites";
 import { FileDiffPanel } from "./components/file-panel";
 import { FileCard } from "./components/file-card";
@@ -64,18 +67,14 @@ function App({
   runtime = DEFAULT_RUNTIME,
   initialReviewState,
   initialReviewStateAvailable,
-  packIndex,
   selectedPackId,
-  onSelectPack,
   onHome,
 }: {
   pr: Pr;
   runtime?: Runtime;
   initialReviewState: ReviewState | null;
   initialReviewStateAvailable: boolean;
-  packIndex: PackIndexEntry[];
   selectedPackId: string;
-  onSelectPack: (id: string) => void;
   onHome: () => void;
 }) {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -115,12 +114,18 @@ function App({
   const [mode, setMode] = useState<Mode>("high-level");
   // Triage state per decision card. null = open; "accept" | "flag" | "block".
   const [decisionStatus, setDecisionStatus] = useState<StatusMap>(() => startingReviewState.decisions);
+  // Per-item "A" baseline — the content snapshot taken when the reviewer triaged.
+  const [baselines, setBaselines] = useState<Record<string, FocusBaseline>>(() => startingReviewState.baselines);
+  const focusIndex = useMemo(() => indexFocusItems(pr.decisions, pr.overview), [pr]);
   const [readingMode, setReadingMode] = useState(initialReadingMode);
   // Two independent rail filters, both default off so the list starts as a
   // burn-down of what's left: viewed files hidden (re-check to bring them
   // back, struck through), likely-noise files hidden.
   const [includeViewed, setIncludeViewed] = useState(false);
   const [includeNoise, setIncludeNoise] = useState(false);
+  // Re-review burn-down: focus the code list on files that changed since you
+  // last marked them viewed (the file-level "what moved under me").
+  const [onlyChanged, setOnlyChanged] = useState(false);
   // FileCard still speaks the legacy NoiseMode; "expanded" is now reached only
   // by the per-block inline reveal, not a global control.
   const noiseMode: NoiseMode = includeNoise ? "all" : "focus";
@@ -144,8 +149,10 @@ function App({
       includeNoise,
       includeViewed,
       reviewedSet: reviewed,
+      changedViewedSet: changedViewedFiles,
+      onlyChanged,
     }),
-    [baseCodeView, includeNoise, includeViewed, reviewed, pr.reviewSignals]
+    [baseCodeView, includeNoise, includeViewed, onlyChanged, reviewed, changedViewedFiles, pr.reviewSignals]
   );
 
   useEffect(() => {
@@ -175,10 +182,37 @@ function App({
       viewed: Array.from(reviewed),
       viewedFiles: viewedFileMap,
       decisions: decisionStatus,
+      baselines,
       updatedAt: new Date().toISOString(),
     };
     persistReviewState(reviewStateKey, state, selectedPackId);
-  }, [decisionStatus, reviewed, selectedPackId, viewedFileMap, reviewStateKey]);
+  }, [decisionStatus, baselines, reviewed, selectedPackId, viewedFileMap, reviewStateKey]);
+
+  // Re-review focus is meaningful only while something changed; clear the sticky
+  // flag once the changed-set empties so it can't silently re-engage later.
+  useEffect(() => {
+    if (onlyChanged && changedViewedFiles.size === 0) setOnlyChanged(false);
+  }, [onlyChanged, changedViewedFiles]);
+
+  // Backfill a baseline for any already-triaged item that has none (state from
+  // before baselines existed) so its future drift can surface as re-review.
+  const baselineBackfilledRef = useRef(false);
+  useEffect(() => {
+    if (baselineBackfilledRef.current) return;
+    baselineBackfilledRef.current = true;
+    setBaselines((prev) => {
+      let added = false;
+      const next = { ...prev };
+      for (const id of Object.keys(decisionStatus)) {
+        if (next[id]) continue;
+        const item = focusIndex.get(id);
+        if (!item) continue;
+        next[id] = focusItemSnapshot(item, new Date().toISOString());
+        added = true;
+      }
+      return added ? next : prev;
+    });
+  }, [decisionStatus, focusIndex]);
 
   const onSymbol = useCallback((id: string) => {
     setActiveSymId(id);
@@ -300,7 +334,15 @@ function App({
       else delete next[cardId];
       return next;
     });
-  }, []);
+    // Triaging (re)baselines the item to current content; clearing drops it.
+    setBaselines((prev) => {
+      const next = { ...prev };
+      const item = focusIndex.get(cardId);
+      if (s && item) next[cardId] = focusItemSnapshot(item, new Date().toISOString());
+      else delete next[cardId];
+      return next;
+    });
+  }, [focusIndex]);
 
 
   const onRailResizeStart = useCallback((event: React.PointerEvent) => {
@@ -410,20 +452,6 @@ function App({
           <span aria-hidden="true" className="w-[14px] h-[14px] rounded-[4px] bg-ink relative before:content-[''] before:absolute before:inset-[3px] before:border-[1.5px] before:border-rail before:rounded-[1px]" />
           <span>aha</span>
         </button>
-        {packIndex.length > 0 && (
-          <select
-            className="h-[26px] max-w-[300px] rounded-[6px] border border-line bg-bg-3 px-[8px] font-mono text-[11px] text-ink-2 outline-none hover:border-line-2 focus:border-blue focus:text-ink"
-            value={selectedPackId}
-            onChange={(event) => onSelectPack(event.target.value)}
-            title="Select aha pack"
-          >
-            {packIndex.map((pack) => (
-              <option key={pack.id} value={pack.id}>
-                {pack.repo} #{pack.pr} · {pack.title}
-              </option>
-            ))}
-          </select>
-        )}
         <div className="inline-flex items-center gap-[6px] text-ink-3 text-[12.5px]">
           <span className="text-ink-2">{repositoryName}</span>
           <span className="text-ink-4">/</span>
@@ -525,6 +553,9 @@ function App({
             onIncludeViewedChange={setIncludeViewed}
             includeNoise={includeNoise}
             onIncludeNoiseChange={setIncludeNoise}
+            changedSinceReviewCount={changedViewedFiles.size}
+            onlyChanged={onlyChanged}
+            onOnlyChangedChange={setOnlyChanged}
             noiseFileCount={noiseFileCount}
             totalFileCount={totalFileCount}
             reviewedCount={reviewedCount}
@@ -565,6 +596,7 @@ function App({
               files={pr.files}
               symbols={pr.symbols}
               statusMap={decisionStatus}
+              baselines={baselines}
               setStatus={setStatus}
               flashId={decisionFlashId}
               onSymbol={onSymbol}
@@ -764,9 +796,7 @@ function AhaLoader() {
       runtime={state.runtime}
       initialReviewState={state.reviewState}
       initialReviewStateAvailable={state.reviewStateAvailable}
-      packIndex={state.packIndex}
       selectedPackId={state.selectedPackId}
-      onSelectPack={navigate}
       onHome={() => navigate("")}
     />
   );
@@ -804,6 +834,10 @@ function normalizePackIndex(value: unknown): PackIndexEntry[] {
       updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : "",
       filesChanged: Number.isFinite(Number(entry.filesChanged)) ? Number(entry.filesChanged) : 0,
       reviewed: Number.isFinite(Number(entry.reviewed)) ? Number(entry.reviewed) : 0,
+      focusTotal: Number.isFinite(Number(entry.focusTotal)) ? Number(entry.focusTotal) : 0,
+      focusDecided: Number.isFinite(Number(entry.focusDecided)) ? Number(entry.focusDecided) : 0,
+      focusFlagged: Number.isFinite(Number(entry.focusFlagged)) ? Number(entry.focusFlagged) : 0,
+      focusBlocked: Number.isFinite(Number(entry.focusBlocked)) ? Number(entry.focusBlocked) : 0,
     }))
     .filter((entry) => entry.id);
 }
@@ -1068,12 +1102,13 @@ function rangeLineCount(range: SignalRange): number {
 
 function normalizeOverview(overview: any, canonicalFileId: IdentityFileId = identityFileId): Overview | null {
   if (!overview || typeof overview !== "object") return null;
+  const usedIds = new Set<string>();
   return {
     mentalModelDelta: normalizeRichText(overview.mentalModelDelta, canonicalFileId),
     systemMap: normalizeSystemMap(overview.systemMap, canonicalFileId),
     modelDeltas: Array.isArray(overview.modelDeltas)
-      ? overview.modelDeltas.map((item: any, index: number) => ({
-        id: normalizeOverviewItemId(item, "model-delta", index),
+      ? overview.modelDeltas.map((item: any) => ({
+        id: overviewItemId(item, "model-delta", usedIds),
         title: normalizeRichText(item?.title, canonicalFileId),
         before: normalizeRichText(item?.before, canonicalFileId),
         after: normalizeRichText(item?.after, canonicalFileId),
@@ -1090,18 +1125,22 @@ function normalizeOverview(overview: any, canonicalFileId: IdentityFileId = iden
       })).filter((flow: any) => flow.lines.length || flow.before.length || flow.after.length)
       : [],
     assumptions: Array.isArray(overview.assumptions)
-      ? overview.assumptions.map((item: any, index: number) => ({
-        id: normalizeOverviewItemId(item, "assumption", index),
+      ? overview.assumptions.map((item: any) => ({
+        id: overviewItemId(item, "assumption", usedIds),
         text: normalizeRichText(item?.text, canonicalFileId),
         refs: normalizeRefs(item?.refs, canonicalFileId),
+        evidence: normalizeFocusEvidence(item?.evidence, canonicalFileId),
+        check: typeof item?.check === "string" ? item.check : undefined,
       }))
       : [],
     hotspots: Array.isArray(overview.hotspots)
-      ? overview.hotspots.map((item: any, index: number) => ({
-        id: normalizeOverviewItemId(item, "hotspot", index),
+      ? overview.hotspots.map((item: any) => ({
+        id: overviewItemId(item, "hotspot", usedIds),
         title: normalizeRichText(item?.title, canonicalFileId),
         why: normalizeRichText(item?.why, canonicalFileId),
         refs: normalizeRefs(item?.refs, canonicalFileId),
+        evidence: normalizeFocusEvidence(item?.evidence, canonicalFileId),
+        check: typeof item?.check === "string" ? item.check : undefined,
       }))
       : [],
   };
@@ -1117,10 +1156,6 @@ function normalizeSystemMap(systemMap: any, canonicalFileId: IdentityFileId = id
   return { title, kind, lines, refs };
 }
 
-function normalizeOverviewItemId(item: any, kind: string, index: number): string {
-  if (typeof item?.id === "string" && item.id.trim()) return item.id.trim();
-  return `overview-${kind}-${index + 1}`;
-}
 
 function normalizeRichText(value: any, canonicalFileId: IdentityFileId = identityFileId): RichTextValue {
   if (typeof value === "string") return value;
@@ -1152,12 +1187,25 @@ function normalizeRef(ref: any, canonicalFileId: IdentityFileId = identityFileId
   return id ? { ...ref, id } : null;
 }
 
+// Content-anchored fallback id for an author-id-less decision card (mirrors the
+// overview items): category + primary evidence file + topic slug, never the list
+// position, so triage doesn't stick to a slot across regeneration.
+function decisionFallbackId(card: any, index: number): string {
+  const sections = Array.isArray(card?.sections) ? card.sections : [];
+  const anchor = sections
+    .flatMap((sec: any) => (Array.isArray(sec?.items) ? sec.items : []))
+    .find((it: any) => it && (it.path || it.fileId));
+  const fileStem = anchor ? idSlug(stemOfPath(anchor.path || anchor.fileId)) : "";
+  const topic = topicSlug(card?.title || card?.claim || "");
+  const parts = ["dc", slugId(card?.category || "decision"), fileStem, topic].filter(Boolean);
+  return parts.length > 2 ? parts.join("-") : `dc-${slugId(card?.category || "decision")}-${index + 1}`;
+}
+
 function normalizeDecisionCards(cards: any, canonicalFileId: IdentityFileId = identityFileId): any[] {
   if (!Array.isArray(cards)) return [];
   const used = new Set<string>();
   return cards.map((card: any, index: number) => {
-    const fallback = `dc-${slugId(card?.category || "decision")}-${index + 1}`;
-    const rawId = typeof card?.id === "string" && card.id.trim() ? card.id.trim() : fallback;
+    const rawId = typeof card?.id === "string" && card.id.trim() ? card.id.trim() : decisionFallbackId(card, index);
     let id = rawId;
     let suffix = 2;
     while (used.has(id)) {
@@ -1194,6 +1242,14 @@ function normalizeDecisionQuestions(questions: any, canonicalFileId: IdentityFil
       ? question.jumps.map((jump: any) => normalizeDecisionJump(jump, canonicalFileId))
       : question?.jumps,
   }));
+}
+
+function normalizeFocusEvidence(evidence: any, canonicalFileId: IdentityFileId = identityFileId): any[] | undefined {
+  if (!Array.isArray(evidence)) return undefined;
+  const items = evidence
+    .filter((item) => item && typeof item === "object")
+    .map((item: any) => normalizeDecisionJump(item, canonicalFileId));
+  return items.length ? items : undefined;
 }
 
 function normalizeDecisionJump(item: any, canonicalFileId: IdentityFileId = identityFileId): any {
@@ -1363,15 +1419,20 @@ interface RailFilterOptions {
   includeNoise: boolean;
   includeViewed: boolean;
   reviewedSet: Set<string>;
+  changedViewedSet: Set<string>;
+  onlyChanged: boolean;
 }
 
 // Shrink the code view to "what still needs attention": optionally drop
-// likely-noise files and/or files already marked viewed. Drives both the rail
-// and the center document so the two stay in lockstep.
+// likely-noise files and/or files already marked viewed. The re-review focus
+// (onlyChanged) overrides both — it scopes to just the files that changed since
+// you last viewed them. Drives both the rail and the center document in lockstep.
 function applyRailFilters(codeView: CodeView, opts: RailFilterOptions): CodeView {
-  const { reviewSignals, includeNoise, includeViewed, reviewedSet } = opts;
-  if (includeNoise && includeViewed) return codeView;
+  const { reviewSignals, includeNoise, includeViewed, reviewedSet, changedViewedSet, onlyChanged } = opts;
+  const focusChanged = onlyChanged && changedViewedSet.size > 0;
+  if (!focusChanged && includeNoise && includeViewed) return codeView;
   const isVisible = (file: PackFile) => {
+    if (focusChanged) return changedViewedSet.has(fileReviewKey(file));
     if (!includeNoise && isNoiseSignal(reviewSignals?.files?.[fileSignalKey(file)])) return false;
     if (!includeViewed && reviewedSet.has(fileReviewKey(file))) return false;
     return true;
@@ -1516,7 +1577,23 @@ function normalizeReviewState(input: any, pr: Pr): ReviewState {
       }
     }
   }
-  return { viewed: Array.from(viewed), viewedFiles, changedViewed: Array.from(changedViewed), decisions };
+  const baselines: Record<string, FocusBaseline> = {};
+  if (input?.baselines && typeof input.baselines === "object") {
+    for (const [id, raw] of Object.entries(input.baselines as Record<string, any>)) {
+      // Only keep baselines for items still triaged — a dropped triage has no baseline.
+      if (!decisions[id] || !raw || typeof raw !== "object") continue;
+      const lens = raw.lens === "decide" || raw.lens === "inspect" || raw.lens === "verify" ? raw.lens : "decide";
+      baselines[id] = {
+        lens,
+        title: typeof raw.title === "string" ? raw.title : "",
+        body: typeof raw.body === "string" ? raw.body : "",
+        check: typeof raw.check === "string" ? raw.check : "",
+        sig: typeof raw.sig === "string" ? raw.sig : "",
+        at: typeof raw.at === "string" ? raw.at : "",
+      };
+    }
+  }
+  return { viewed: Array.from(viewed), viewedFiles, changedViewed: Array.from(changedViewed), decisions, baselines };
 }
 
 function readLocalReviewState(pr: Pr, reviewStateKey: string, legacyReviewStateStorageKey: string, legacyStatusStorageKey: string): ReviewState {
@@ -1528,6 +1605,7 @@ function readLocalReviewState(pr: Pr, reviewStateKey: string, legacyReviewStateS
     viewed: state.viewed,
     viewedFiles: state.viewedFiles,
     decisions: { ...legacyDecisions, ...(state.decisions || {}) },
+    baselines: state.baselines,
     updatedAt: state.updatedAt,
   }, pr);
 }

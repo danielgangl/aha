@@ -25,6 +25,19 @@ Those tests use a fake `gh` binary and temporary local repos. They are blackbox
 value tests for the CLI. They do not replace this runbook, because this runbook
 also covers real GitHub PRs and external AI behavior.
 
+The re-review path specifically — a reviewer's triage + content baselines
+surviving an `update`, stable item ids across regeneration, and the
+baseline-driven `A -> C` re-review classification — is exercised hermetically by:
+
+```sh
+npm run e2e:rereview
+```
+
+It walks generate -> simulated init enrichment -> triage + baselines -> update ->
+simulated re-enrichment, then runs the real client `buildReviewFocus` and asserts
+that changed items resurface as re-review, unchanged stay resolved, and a new
+concern is open. It also runs as part of `npm test`.
+
 ## Preconditions
 
 - GitHub CLI is installed and authenticated.

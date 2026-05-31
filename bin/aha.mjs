@@ -13,6 +13,7 @@ import {
   AHA_FULL_WORKFLOW_INIT_PROMPT,
   AHA_FULL_WORKFLOW_UPDATE_PROMPT,
 } from "../src/prompts.js";
+import { overviewItemId } from "../src/lib/focus-id.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -981,14 +982,15 @@ function decisionItemRefValid(item, filePaths) {
 
 function preserveOverview(overview, refs) {
   if (!overview || typeof overview !== "object") return null;
+  const usedIds = new Set();
   return {
     mentalModelDelta: preserveRichText(overview.mentalModelDelta, refs),
     systemMap: preserveSystemMap(overview.systemMap, refs),
     modelDeltas: (Array.isArray(overview.modelDeltas) ? overview.modelDeltas : [])
       .filter((item) => item && typeof item === "object")
-      .map((item, index) => ({
+      .map((item) => ({
         ...item,
-        id: typeof item.id === "string" && item.id ? item.id : `overview-model-delta-${index + 1}`,
+        id: overviewItemId(item, "model-delta", usedIds),
         title: preserveRichText(item.title, refs),
         before: preserveRichText(item.before, refs),
         after: preserveRichText(item.after, refs),
@@ -1005,17 +1007,17 @@ function preserveOverview(overview, refs) {
       })),
     assumptions: (Array.isArray(overview.assumptions) ? overview.assumptions : [])
       .filter((item) => item && typeof item === "object")
-      .map((item, index) => ({
+      .map((item) => ({
         ...item,
-        id: typeof item.id === "string" && item.id ? item.id : `overview-assumption-${index + 1}`,
+        id: overviewItemId(item, "assumption", usedIds),
         text: preserveRichText(item.text, refs),
         refs: preserveRefs(item.refs, refs),
       })),
     hotspots: (Array.isArray(overview.hotspots) ? overview.hotspots : [])
       .filter((item) => item && typeof item === "object")
-      .map((item, index) => ({
+      .map((item) => ({
         ...item,
-        id: typeof item.id === "string" && item.id ? item.id : `overview-hotspot-${index + 1}`,
+        id: overviewItemId(item, "hotspot", usedIds),
         title: preserveRichText(item.title, refs),
         why: preserveRichText(item.why, refs),
         refs: preserveRefs(item.refs, refs),
@@ -2425,7 +2427,9 @@ function ahaJsonPlugin(packFile, runtime = {}) {
               return;
             }
             fs.mkdirSync(path.dirname(stateFile), { recursive: true });
-            const tmpFile = `${stateFile}.${process.pid}.tmp`;
+            // Unique per write so overlapping PUTs from this process can't clobber
+            // each other's temp file mid-write (rename stays atomic-visible).
+            const tmpFile = `${stateFile}.${process.pid}.${stateWriteSeq++}.tmp`;
             fs.writeFileSync(tmpFile, JSON.stringify(state, null, 2) + "\n");
             fs.renameSync(tmpFile, stateFile);
             res.end(JSON.stringify({ ok: true, path: stateFile }) + "\n");
@@ -2603,11 +2607,12 @@ function packEntryForFile(file) {
     updatedAt: stat.mtime.toISOString(),
     filesChanged: Array.isArray(pack.files) ? pack.files.length : 0,
     reviewed: reviewedCountForPack(resolved),
+    ...focusProgressForPack(resolved, pack),
   };
 }
 
 // Cheap glance at how far a pack's local review got — drives the dashboard
-// progress bar without the client having to fetch every state sidecar.
+// progress bars without the client having to fetch every state sidecar.
 function reviewedCountForPack(packFile) {
   try {
     const stateFile = stateFileForPack(packFile);
@@ -2619,6 +2624,43 @@ function reviewedCountForPack(packFile) {
   } catch {
     return 0;
   }
+}
+
+// Review Focus burn-down per pack: total = decisions + hotspots + assumptions;
+// decided/flagged/blocked come from the per-pack triage in the state sidecar.
+function focusProgressForPack(packFile, pack) {
+  // The ids that still exist in the pack — triage for any other id is an orphan
+  // (a retired/renamed item) and must not count toward progress.
+  const focusIds = new Set(
+    [
+      ...(Array.isArray(pack?.decisions?.cards) ? pack.decisions.cards : []),
+      ...(Array.isArray(pack?.overview?.hotspots) ? pack.overview.hotspots : []),
+      ...(Array.isArray(pack?.overview?.assumptions) ? pack.overview.assumptions : []),
+    ]
+      .map((item) => item?.id)
+      .filter((id) => typeof id === "string" && id),
+  );
+  const focusTotal = focusIds.size;
+  let decided = 0;
+  let focusFlagged = 0;
+  let focusBlocked = 0;
+  try {
+    const stateFile = stateFileForPack(packFile);
+    if (fs.existsSync(stateFile)) {
+      const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+      if (state?.decisions && typeof state.decisions === "object") {
+        for (const [id, value] of Object.entries(state.decisions)) {
+          if (!focusIds.has(id)) continue;
+          if (value === "accept" || value === "flag" || value === "block") decided += 1;
+          if (value === "flag") focusFlagged += 1;
+          if (value === "block") focusBlocked += 1;
+        }
+      }
+    }
+  } catch {
+    // ignore unreadable/partial state
+  }
+  return { focusTotal, focusDecided: decided, focusFlagged, focusBlocked };
 }
 
 // Target repos the served app may initialize PRs from. Names only ever cross to
@@ -2778,6 +2820,9 @@ function reportPathFor(file) {
   return `${base}.update-report.json`;
 }
 
+// Monotonic per-process counter for unique state temp-file names.
+let stateWriteSeq = 0;
+
 function sanitizeReviewState(input) {
   const viewed = Array.isArray(input?.viewed)
     ? Array.from(new Set(input.viewed.filter((id) => typeof id === "string")))
@@ -2802,11 +2847,27 @@ function sanitizeReviewState(input) {
       }
     }
   }
+  const baselines = {};
+  if (input?.baselines && typeof input.baselines === "object") {
+    for (const [id, raw] of Object.entries(input.baselines)) {
+      // Keep a content baseline only for an item that is still triaged.
+      if (typeof id !== "string" || !decisions[id] || !raw || typeof raw !== "object") continue;
+      baselines[id] = {
+        lens: ["decide", "inspect", "verify"].includes(raw.lens) ? raw.lens : "decide",
+        title: typeof raw.title === "string" ? raw.title : "",
+        body: typeof raw.body === "string" ? raw.body : "",
+        check: typeof raw.check === "string" ? raw.check : "",
+        sig: typeof raw.sig === "string" ? raw.sig : "",
+        at: typeof raw.at === "string" ? raw.at : "",
+      };
+    }
+  }
   return {
     schemaVersion: "0.2",
     viewed,
     viewedFiles,
     decisions,
+    baselines,
     updatedAt: new Date().toISOString(),
   };
 }

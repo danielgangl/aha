@@ -327,18 +327,27 @@ export function DiffRow({
 export function DiffExcerpt({
   file,
   anchorLine,
-  context = 3,
+  context,
+  contextAbove,
+  contextBelow,
   symbols,
   onSymbol,
   fontClass = "text-[11.5px]",
 }: {
   file: PackFile;
   anchorLine?: number | null;
+  // Symmetric window override; the per-side props win when set. Default is
+  // asymmetric (more below than above) so the collapsed evidence shows enough
+  // surrounding code to be understood without expanding.
   context?: number;
+  contextAbove?: number;
+  contextBelow?: number;
   symbols?: SymbolMap;
   onSymbol?: SymbolHandler;
   fontClass?: string;
 }) {
+  const above = contextAbove ?? context ?? 5;
+  const below = contextBelow ?? context ?? 8;
   const [full, setFull] = useState(false);
   // Unified: walk the diff lines in order, skipping hunk markers.
   const lines = useMemo(() => file.diff.filter((line) => line.k !== "hunk"), [file.diff]);
@@ -349,8 +358,8 @@ export function DiffExcerpt({
   }, [lines, anchorLine]);
 
   const windowed = !full && anchorIdx >= 0;
-  const start = windowed ? Math.max(0, anchorIdx - context) : 0;
-  const end = windowed ? Math.min(lines.length, anchorIdx + context + 1) : lines.length;
+  const start = windowed ? Math.max(0, anchorIdx - above) : 0;
+  const end = windowed ? Math.min(lines.length, anchorIdx + below + 1) : lines.length;
   const slice = lines.slice(start, end);
   const hiddenAbove = start;
   const hiddenBelow = lines.length - end;

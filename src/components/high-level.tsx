@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 import type {
   DecisionHandler,
+  DecisionJump,
   Decisions,
   FileJumpHandler,
+  FocusBaseline,
   Lens,
   Overview,
   PackFile,
@@ -14,8 +16,9 @@ import type {
   TriageStatus,
 } from "../types";
 import { categoryLabel, hasOverviewContent } from "../lib/pack";
-import { AsciiPanel, RefList, RichText } from "./rich";
-import { CopyContextButton, DecisionCard, LensPill, ResolveZone } from "../decisions.js";
+import { AsciiPanel, InlineText, RefList, RichText } from "./rich";
+import { CopyContextButton, DecisionCard, EvidenceRow, LensPill, ResolveZone, SectionBlock } from "../decisions.js";
+import { StatusPill, TriageButtons } from "./triage";
 import type { FocusItem } from "../lib/review-focus";
 import { buildReviewFocus, focusItemContext } from "../lib/review-focus";
 
@@ -122,6 +125,7 @@ export function HighLevelView({
   files,
   symbols,
   statusMap,
+  baselines,
   setStatus,
   flashId,
   onSymbol,
@@ -133,6 +137,7 @@ export function HighLevelView({
   files: PackFile[];
   symbols?: SymbolMap;
   statusMap: StatusMap;
+  baselines: Record<string, FocusBaseline>;
   setStatus: (id: string, status: TriageStatus | null) => void;
   flashId: string | null;
   onSymbol: SymbolHandler;
@@ -142,12 +147,17 @@ export function HighLevelView({
   const hasOverview = overview && hasOverviewContent(overview);
 
   // Review Focus worklist (merged + sorted + bundled) — pure data lives in lib.
-  const { open: openFocus, resolved: resolvedFocus, nonAccepted: nonAcceptedFocus, nonAcceptedContext } =
-    buildReviewFocus(decisions, overview, statusMap, files);
-  const totalFocus = openFocus.length + resolvedFocus.length;
+  const { open: openFocus, reReview: reReviewFocus, resolved: resolvedFocus, nonAccepted: nonAcceptedFocus, nonAcceptedContext } =
+    buildReviewFocus(decisions, overview, statusMap, files, baselines);
+  const totalFocus = openFocus.length + reReviewFocus.length + resolvedFocus.length;
   const hasFocus = totalFocus > 0;
 
-  const renderOpenFocus = (item: FocusItem) => {
+  // Full worklist card, shared by Open and Re-review. opts.topBanner adds the
+  // provenance strip; opts.onSetStatus lets Re-review re-confirm (a click on the
+  // prior status re-baselines instead of un-triaging).
+  const renderFullFocus = (item: FocusItem, opts?: { topBanner?: ReactNode; onSetStatus?: SetStatusHandler }) => {
+    const onSetStatus = opts?.onSetStatus ?? ((status: TriageStatus | null) => setStatus(item.id, status));
+    const topBanner = opts?.topBanner;
     if (item.decision) {
       return (
         <DecisionCard
@@ -160,9 +170,10 @@ export function HighLevelView({
           onSymbol={onSymbol}
           onJump={onFile}
           status={statusMap[item.id]}
-          onSetStatus={(status) => setStatus(item.id, status)}
+          onSetStatus={onSetStatus}
           flash={flashId === item.id}
           inOverview
+          topBanner={topBanner}
         />
       );
     }
@@ -175,9 +186,14 @@ export function HighLevelView({
           title={<RichText value={item.hotspot.title} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
           why={<RichText value={item.hotspot.why} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
           refs={item.hotspot.refs}
+          evidence={item.hotspot.evidence}
+          check={item.hotspot.check}
+          files={files}
+          symbols={symbols}
           status={statusMap[item.id]}
-          onSetStatus={(status) => setStatus(item.id, status)}
+          onSetStatus={onSetStatus}
           flash={flashId === item.id}
+          topBanner={topBanner}
           onSymbol={onSymbol}
           onFile={onFile}
           onDecision={onDecision}
@@ -192,9 +208,14 @@ export function HighLevelView({
           lens="verify"
           title={<RichText value={item.assumption.text} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
           refs={item.assumption.refs}
+          evidence={item.assumption.evidence}
+          check={item.assumption.check}
+          files={files}
+          symbols={symbols}
           status={statusMap[item.id]}
-          onSetStatus={(status) => setStatus(item.id, status)}
+          onSetStatus={onSetStatus}
           flash={flashId === item.id}
+          topBanner={topBanner}
           onSymbol={onSymbol}
           onFile={onFile}
           onDecision={onDecision}
@@ -203,6 +224,23 @@ export function HighLevelView({
     }
     return null;
   };
+
+  const renderOpenFocus = (item: FocusItem) => renderFullFocus(item);
+
+  const renderReReviewFocus = (item: FocusItem) =>
+    renderFullFocus(item, {
+      topBanner: (
+        <ChangedSinceStrip
+          status={statusMap[item.id]}
+          baseline={baselines[item.id]}
+          // Acknowledge: keep the prior call but re-baseline to current → leaves
+          // re-review. The triage buttons stay normal (clicking the active one
+          // still clears/un-triages, like everywhere else).
+          onAcknowledge={() => setStatus(item.id, statusMap[item.id] ?? null)}
+        />
+      ),
+      onSetStatus: (status: TriageStatus | null) => setStatus(item.id, status),
+    });
 
   const renderResolvedFocus = (item: FocusItem) => {
     const status = statusMap[item.id];
@@ -391,6 +429,22 @@ export function HighLevelView({
               }
             />
             <div className="grid gap-3">
+              {reReviewFocus.length > 0 && (
+                <div className="flex items-center gap-[10px] text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-ink">
+                  <span>⟳ Needs re-review</span>
+                  <span className="font-mono">{reReviewFocus.length}</span>
+                  <span className="flex-1 h-px bg-amber-soft" />
+                </div>
+              )}
+              {reReviewFocus.map((item) => renderReReviewFocus(item))}
+
+              {reReviewFocus.length > 0 && openFocus.length > 0 && (
+                <div className="flex items-center gap-[10px] pt-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-4">
+                  <span>Open</span>
+                  <span className="font-mono">{openFocus.length}</span>
+                  <span className="flex-1 h-px bg-line" />
+                </div>
+              )}
               {openFocus.map((item) => renderOpenFocus(item))}
 
               {resolvedFocus.length > 0 && (
@@ -485,7 +539,7 @@ export function CompactReviewCard({
           {category && <CatPill>{category}</CatPill>}
           {risk && <OverviewRiskPill risk={risk} />}
           {number && <OverviewNum>{number}</OverviewNum>}
-          {status && <DecisionStatusPill status={status} />}
+          {status && <StatusPill status={status} />}
         </div>
         {/* .overview-action-title */}
         <h3 className="m-0 font-sans text-[13.5px] leading-[1.35] font-semibold text-ink [text-wrap:pretty]">{title}</h3>
@@ -493,9 +547,53 @@ export function CompactReviewCard({
       {/* .overview-action-controls */}
       <div className="self-center flex items-center gap-2">
         {copyContext && <CopyContextButton text={copyContext} />}
-        <DecisionTriage status={status} onSetStatus={onSetStatus} />
+        <TriageButtons status={status} onSetStatus={onSetStatus} />
       </div>
     </article>
+  );
+}
+
+function statusVerb(status: TriageStatus | undefined): string {
+  return status === "flag" ? "flagged" : status === "block" ? "blocked" : status === "accept" ? "accepted" : "judged";
+}
+
+// Re-review provenance: what you judged ("A") and your prior call, shown above
+// the live card ("C") so you re-decide with context. The "re-reviewed" button
+// keeps the prior call and re-baselines (acknowledges the change). Rendered as a
+// card topBanner.
+function ChangedSinceStrip({
+  status,
+  baseline,
+  onAcknowledge,
+}: {
+  status: TriageStatus | undefined;
+  baseline: FocusBaseline | undefined;
+  onAcknowledge: () => void;
+}) {
+  if (!baseline) return null;
+  return (
+    <div className="mb-3 pb-3 border-b border-dashed border-line-2">
+      <div className="flex items-center gap-[6px] mb-[5px]">
+        <span className="flex-1 inline-flex items-center gap-[6px] text-[11px] font-semibold text-amber-ink">
+          <span aria-hidden="true">⟳</span>
+          <span>changed since you {statusVerb(status)}</span>
+        </span>
+        <button
+          type="button"
+          onClick={onAcknowledge}
+          title="Mark re-reviewed — keep your call and clear the changed flag"
+          className="h-[22px] px-[8px] inline-flex items-center gap-[5px] border border-line-2 rounded-[6px] bg-surface text-ink-3 font-mono text-[10.5px] normal-case cursor-pointer hover:bg-bg-3 hover:text-ink"
+        >
+          ✓ re-reviewed
+        </button>
+      </div>
+      <div className="text-[11.5px] leading-[1.5] text-ink-3 [text-wrap:pretty]">
+        <span className="text-ink-4">was: </span>
+        <span className="text-ink-2"><InlineText text={baseline.title} /></span>
+        {baseline.body && <span className="block mt-[2px]"><InlineText text={baseline.body} /></span>}
+        {baseline.check && <span className="block mt-[2px]">Decide: <InlineText text={baseline.check} /></span>}
+      </div>
+    </div>
   );
 }
 
@@ -509,9 +607,14 @@ function FocusCard({
   title,
   why,
   refs,
+  evidence,
+  check,
+  files,
+  symbols,
   status,
   onSetStatus,
   flash,
+  topBanner,
   onSymbol,
   onFile,
   onDecision,
@@ -521,21 +624,28 @@ function FocusCard({
   title: ReactNode;
   why?: ReactNode;
   refs?: RichRef[];
+  evidence?: DecisionJump[];
+  check?: string;
+  files: PackFile[];
+  symbols?: SymbolMap;
   status: TriageStatus | undefined;
   onSetStatus: SetStatusHandler;
   flash?: boolean;
+  topBanner?: ReactNode;
   onSymbol: SymbolHandler;
   onFile: FileJumpHandler;
   onDecision: DecisionHandler;
 }) {
+  const evidenceItems = (Array.isArray(evidence) ? evidence : []).filter(Boolean);
   return (
     <article
       id={id}
       className={`relative border border-line rounded-[12px] px-5 pt-[18px] pb-4 scroll-mt-[130px] bg-surface ${statusGradient(status)} ${flash ? "animate-[flashbg_1.6s_ease-out]" : ""}`}
     >
+      {topBanner}
       <header className="flex items-center gap-[6px] flex-wrap mb-[6px]">
         <LensPill lens={lens} />
-        {status && <DecisionStatusPill status={status} />}
+        {status && <StatusPill status={status} />}
       </header>
       <h3 className="font-sans font-semibold text-base leading-[1.3] tracking-[-0.008em] text-ink mt-[6px] mb-2 [text-wrap:pretty]">
         {title}
@@ -546,8 +656,23 @@ function FocusCard({
           {why}
         </div>
       )}
+      {evidenceItems.length > 0 && (
+        <SectionBlock kind="evidence" label="Evidence">
+          {evidenceItems.map((it, j) => (
+            <EvidenceRow
+              key={`${it.ref || "item"}-${it.path || it.fileId || "no-file"}-${it.line || j}`}
+              item={it}
+              kind="evidence"
+              files={files}
+              onJump={onFile}
+              symbols={symbols}
+              onSymbol={onSymbol}
+            />
+          ))}
+        </SectionBlock>
+      )}
       {refs && refs.length > 0 && <RefList refs={refs} onSymbol={onSymbol} onFile={onFile} onDecision={onDecision} />}
-      <ResolveZone status={status} onSetStatus={onSetStatus} />
+      <ResolveZone question={check} status={status} onSetStatus={onSetStatus} />
     </article>
   );
 }
@@ -581,52 +706,3 @@ export function OverviewRiskPill({ risk }: { risk: string }) {
   );
 }
 
-export function DecisionStatusPill({ status }: { status: TriageStatus }) {
-  // .dc-status-pill.st-{status}
-  const tone =
-    status === "accept"
-      ? "bg-pine-soft text-pine-ink"
-      : status === "flag"
-      ? "bg-amber-soft text-amber-ink"
-      : "bg-rose-soft text-rose-ink";
-  return (
-    <span
-      className={`inline-flex items-center h-5 px-2 rounded-[4px] font-mono text-[10px] font-semibold tracking-[0.03em] ${tone}`}
-    >
-      {status === "accept" && "✓ Accepted"}
-      {status === "flag" && "? Flagged for discussion"}
-      {status === "block" && "✗ Blocker"}
-    </span>
-  );
-}
-
-export function DecisionTriage({ status, onSetStatus }: { status: TriageStatus | undefined; onSetStatus: SetStatusHandler }) {
-  // .dc-triage + .dc-tri (shared with decisions.tsx TriageButtons)
-  const base =
-    "appearance-none w-[26px] h-[26px] border border-line-2 bg-surface rounded-[6px] text-ink-3 text-[13px] font-semibold cursor-pointer inline-flex items-center justify-center font-mono hover:bg-bg-3 hover:text-ink";
-  return (
-    <div className="flex gap-1">
-      <button
-        className={`${base} ${status === "accept" ? "bg-pine! text-white! border-pine!" : ""}`}
-        onClick={() => onSetStatus(status === "accept" ? null : "accept")}
-        title="Accept"
-      >
-        ✓
-      </button>
-      <button
-        className={`${base} ${status === "flag" ? "bg-amber! text-ink! border-amber!" : ""}`}
-        onClick={() => onSetStatus(status === "flag" ? null : "flag")}
-        title="Flag for discussion"
-      >
-        ?
-      </button>
-      <button
-        className={`${base} ${status === "block" ? "bg-rose! text-white! border-rose!" : ""}`}
-        onClick={() => onSetStatus(status === "block" ? null : "block")}
-        title="Mark as blocker"
-      >
-        ✗
-      </button>
-    </div>
-  );
-}
